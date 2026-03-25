@@ -317,7 +317,15 @@ class OrbitalApiClient @Inject constructor(private val client: HttpClient) {
         if (trimmed in IGNORED_STREAM_MARKERS) return ChatStreamEvent.Noop
 
         return try {
-            val obj = json.parseToJsonElement(trimmed) as? JsonObject ?: return ChatStreamEvent.Output(trimmed)
+            val element = json.parseToJsonElement(trimmed)
+            if (element is JsonPrimitive && element.isString) {
+                val decoded = element.content.trim()
+                if (decoded.isBlank()) return ChatStreamEvent.Noop
+                // Some backends wrap JSON payloads as escaped strings.
+                if (decoded.startsWith("{") || decoded.startsWith("[")) return parseStreamEvent(decoded)
+                return ChatStreamEvent.Output(decoded)
+            }
+            val obj = element as? JsonObject ?: return ChatStreamEvent.Noop
             val kind = (obj.string("kind") ?: obj.string("type") ?: obj.string("event") ?: "").lowercase()
             when (kind) {
                 "output", "delta", "stream_delta", "text_delta" -> {

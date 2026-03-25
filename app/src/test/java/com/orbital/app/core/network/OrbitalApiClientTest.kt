@@ -133,6 +133,13 @@ class OrbitalApiClientTest {
     }
 
     @Test
+    fun `stream parser ignores escaped json envelope inside string`() {
+        val api = clientFor(emptyMap())
+        val event = api.parseStreamEvent("\"{\\\"id\\\":\\\"1\\\",\\\"event\\\":\\\"message\\\",\\\"topic\\\":\\\"krinekk-dev\\\",\\\"message\\\":\\\"ok\\\"}\"")
+        assertEquals(ChatStreamEvent.Noop, event)
+    }
+
+    @Test
     fun `stream parser ignores sse metadata lines`() {
         val api = clientFor(emptyMap())
         val event = api.parseStreamEvent("event: result")
