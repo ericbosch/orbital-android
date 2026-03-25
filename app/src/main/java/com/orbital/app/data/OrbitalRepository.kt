@@ -64,12 +64,17 @@ class OrbitalRepository @Inject constructor(
     suspend fun getProjects(): List<Project> = apiClient.getProjects()
     suspend fun getAgents(): List<Agent> = apiClient.getAgents()
     suspend fun getSessions(projectName: String? = null): List<Session> = apiClient.getSessions(projectName)
-    suspend fun getSessionMessages(sessionId: String): List<ChatMessage> = apiClient.getSessionMessages(sessionId)
-    suspend fun sendMessageAndStream(
+    suspend fun getSessionMessages(
         sessionId: String,
+        provider: String,
+        projectName: String?,
+        projectPath: String?
+    ): List<ChatMessage> = apiClient.getSessionMessages(sessionId, provider, projectName, projectPath)
+    suspend fun sendMessageAndStream(
+        session: Session,
         content: String,
         onEvent: (ChatStreamEvent) -> Unit
-    ) = apiClient.sendMessageAndStream(sessionId, content, onEvent)
+    ) = apiClient.sendMessageAndStream(session, content, onEvent)
     suspend fun search(query: String): List<SearchResult> = apiClient.search(query)
     suspend fun getSkills(): List<Skill> = apiClient.getSkills()
 }

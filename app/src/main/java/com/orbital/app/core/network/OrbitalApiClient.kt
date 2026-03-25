@@ -73,18 +73,30 @@ class OrbitalApiClient @Inject constructor(private val client: HttpClient) {
     }
 
     suspend fun getSessions(projectName: String? = null): List<Session> = try {
+        val url = if (projectName.isNullOrBlank()) {
+            "$baseUrl/api/sessions"
+        } else {
+            "$baseUrl/api/projects/$projectName/sessions"
+        }
         parseArrayBody(
-            client.get("$baseUrl/api/sessions") {
-                authHeader()
-                if (!projectName.isNullOrBlank()) parameter("projectName", projectName)
-            }.body()
-        ).mapNotNull { it.toSession() }
+            client.get(url) { authHeader() }.body()
+        ).mapNotNull { it.toSession(defaultProjectName = projectName) }
     } catch (_: Exception) {
         emptyList()
     }
 
-    suspend fun getSessionMessages(sessionId: String): List<ChatMessage> = try {
-        parseArrayBody(client.get("$baseUrl/api/sessions/$sessionId/messages") { authHeader() }.body())
+    suspend fun getSessionMessages(
+        sessionId: String,
+        provider: String,
+        projectName: String?,
+        projectPath: String?
+    ): List<ChatMessage> = try {
+        parseArrayBody(client.get("$baseUrl/api/sessions/$sessionId/messages") {
+            authHeader()
+            parameter("provider", provider)
+            if (!projectName.isNullOrBlank()) parameter("projectName", projectName)
+            if (!projectPath.isNullOrBlank()) parameter("projectPath", projectPath)
+        }.body())
             .mapNotNull { it.toChatMessage() }
     } catch (_: Exception) {
         emptyList()
@@ -109,10 +121,11 @@ class OrbitalApiClient @Inject constructor(private val client: HttpClient) {
     }
 
     suspend fun sendMessageAndStream(
-        sessionId: String,
+        session: Session,
         content: String,
         onEvent: (ChatStreamEvent) -> Unit
     ) {
+        val sessionId = session.id
         val wsBase = baseUrl
             .replaceFirst("https://", "wss://")
             .replaceFirst("http://", "ws://")
@@ -129,11 +142,26 @@ class OrbitalApiClient @Inject constructor(private val client: HttpClient) {
 
         try {
             client.webSocket(urlString = wsUrl) {
+                val commandType = when (session.provider.lowercase()) {
+                    "codex" -> "codex-command"
+                    "cursor" -> "cursor-command"
+                    "gemini" -> "gemini-command"
+                    else -> "claude-command"
+                }
                 val payload = JsonObject(
                     mapOf(
-                        "type" to JsonPrimitive("message"),
-                        "sessionId" to JsonPrimitive(sessionId),
-                        "content" to JsonPrimitive(content)
+                        "type" to JsonPrimitive(commandType),
+                        "command" to JsonPrimitive(content),
+                        "options" to JsonObject(
+                            buildMap {
+                                put("sessionId", JsonPrimitive(sessionId))
+                                put("resume", JsonPrimitive(true))
+                                if (!session.projectPath.isNullOrBlank()) {
+                                    put("projectPath", JsonPrimitive(session.projectPath))
+                                    put("cwd", JsonPrimitive(session.projectPath))
+                                }
+                            }
+                        )
                     )
                 )
                 send(Frame.Text(json.encodeToString(JsonObject.serializer(), payload)))
@@ -164,16 +192,25 @@ class OrbitalApiClient @Inject constructor(private val client: HttpClient) {
     private fun parseStreamEvent(line: String): ChatStreamEvent {
         return try {
             val obj = json.parseToJsonElement(line) as? JsonObject ?: return ChatStreamEvent.Output(line)
-            when ((obj.string("type") ?: "output").lowercase()) {
-                "output", "delta" -> ChatStreamEvent.Output(
-                    obj.string("text") ?: obj.string("content") ?: obj.string("delta") ?: ""
+            val kind = (obj.string("kind") ?: obj.string("type") ?: "output").lowercase()
+            when (kind) {
+                "output", "delta", "stream_delta" -> ChatStreamEvent.Output(
+                    obj.string("text") ?: obj.string("content") ?: obj.string("delta") ?: obj.string("data") ?: ""
                 )
+                "text" -> {
+                    val role = (obj.string("role") ?: "assistant").lowercase()
+                    if (role == "assistant") {
+                        ChatStreamEvent.Output(obj.string("content") ?: obj.string("text") ?: "")
+                    } else {
+                        ChatStreamEvent.Output("")
+                    }
+                }
                 "tool_use" -> ChatStreamEvent.ToolUse(
                     tool = obj.string("tool") ?: obj.string("name") ?: "tool",
-                    inputSummary = obj.string("input") ?: ""
+                    inputSummary = obj.string("toolInput") ?: obj.string("input") ?: ""
                 )
-                "done", "complete" -> ChatStreamEvent.Done
-                "error" -> ChatStreamEvent.Error(obj.string("message") ?: "unknown error")
+                "done", "complete", "stream_end" -> ChatStreamEvent.Done
+                "error" -> ChatStreamEvent.Error(obj.string("message") ?: obj.string("content") ?: "unknown error")
                 else -> ChatStreamEvent.Output(obj.string("text") ?: line)
             }
         } catch (_: Exception) {
@@ -223,15 +260,18 @@ class OrbitalApiClient @Inject constructor(private val client: HttpClient) {
         return Agent(id = id, name = name, model = model, status = status, sessions = sessions, icon = icon)
     }
 
-    private fun JsonObject.toSession(): Session? {
+    private fun JsonObject.toSession(defaultProjectName: String? = null): Session? {
         val id = string("id") ?: int("id")?.toString() ?: string("sessionId") ?: return null
-        val agent = string("agent") ?: string("agentName") ?: "Unknown"
-        val name = string("name") ?: string("title") ?: id
+        val agent = string("agent") ?: string("agentName") ?: string("provider") ?: "Unknown"
+        val name = string("name") ?: string("title") ?: string("summary") ?: id
         val msgs = int("msgs") ?: int("messageCount") ?: int("messages") ?: 0
         val status = (string("status") ?: "idle").lowercase()
         val updatedAt = long("updatedAt") ?: long("updatedAtMs") ?: long("lastUpdated")
+            ?: parseDateMillis(string("lastActivity"))
         val ago = string("ago") ?: updatedAt?.let(::formatAgo) ?: "now"
-        val projectName = string("projectName") ?: string("project")
+        val projectName = string("projectName") ?: string("project") ?: defaultProjectName
+        val projectPath = string("cwd") ?: string("projectPath")
+        val provider = string("provider") ?: inferProvider(agent)
         return Session(
             id = id,
             agent = agent,
@@ -240,11 +280,18 @@ class OrbitalApiClient @Inject constructor(private val client: HttpClient) {
             ago = ago,
             status = status,
             projectName = projectName,
+            projectPath = projectPath,
+            provider = provider,
             updatedAtMs = updatedAt
         )
     }
 
     private fun JsonObject.toChatMessage(): ChatMessage? {
+        val kind = string("kind")?.lowercase()
+        if (kind == "tool_use") {
+            val tool = string("toolName") ?: "tool"
+            return ChatMessage(role = "a", text = "[tool] $tool")
+        }
         val roleRaw = (string("role") ?: string("from") ?: "assistant").lowercase()
         val role = if (roleRaw.startsWith("u")) "u" else "a"
         val text = string("text") ?: string("content") ?: string("message") ?: return null
@@ -277,6 +324,20 @@ class OrbitalApiClient @Inject constructor(private val client: HttpClient) {
 
     private fun JsonObject.bool(key: String): Boolean? =
         (this[key] as? JsonPrimitive)?.content?.toBooleanStrictOrNull()
+
+    private fun inferProvider(agent: String): String {
+        val lower = agent.lowercase()
+        return when {
+            "codex" in lower -> "codex"
+            "cursor" in lower -> "cursor"
+            "gemini" in lower -> "gemini"
+            else -> "claude"
+        }
+    }
+
+    private fun parseDateMillis(value: String?): Long? =
+        try { if (value.isNullOrBlank()) null else java.time.Instant.parse(value).toEpochMilli() }
+        catch (_: Exception) { null }
 
     private fun formatAgo(updatedAtMs: Long): String {
         val seconds = ((System.currentTimeMillis() - updatedAtMs).coerceAtLeast(0L)) / 1000L

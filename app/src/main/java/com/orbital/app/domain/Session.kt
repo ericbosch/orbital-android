@@ -8,6 +8,8 @@ data class Session(
     val ago: String,
     val status: String, // active | idle
     val projectName: String? = null,
+    val projectPath: String? = null,
+    val provider: String = "claude",
     val updatedAtMs: Long? = null
 )
 

@@ -209,7 +209,7 @@ fun OrbitalNavigation(vm: MainViewModel, appearance: AppearanceSettings) {
                 val id      = back.arguments?.getString("sessionId") ?: return@composable
                 val session = vm.sessions.find { it.id == id }       ?: return@composable
                 val chatVm: ChatViewModel = hiltViewModel()
-                LaunchedEffect(id) { chatVm.bindSession(id) }
+                LaunchedEffect(id) { chatVm.bindSession(session) }
                 ChatScreen(
                     session = session,
                     messages = chatVm.messages,

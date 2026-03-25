@@ -204,7 +204,14 @@ class MainViewModel @Inject constructor(
             }
 
             val loadedSessions = if (remoteProjects.isNotEmpty()) {
-                remoteProjects.flatMap { repository.getSessions(it.name) }
+                remoteProjects.flatMap { project ->
+                    repository.getSessions(project.name).map { session ->
+                        session.copy(
+                            projectName = session.projectName ?: project.name,
+                            projectPath = session.projectPath ?: project.path
+                        )
+                    }
+                }
             } else {
                 repository.getSessions()
             }
@@ -293,10 +300,20 @@ class MainViewModel @Inject constructor(
         sessions.addAll(
             listOf(
                 Session("1", "Claude Code", "refactor-auth-middleware", 14, "2m", "active", "orbital-server"),
-                Session("2", "Codex CLI", "orbital-api-schema", 8, "1h", "idle", "orbital-server"),
-                Session("3", "Claude Code", "fix-nightshift-flock", 32, "3h", "idle", "orbital-android"),
-                Session("4", "Claude Code", "northstar-vector-research", 47, "1d", "idle", "orbital-android"),
-                Session("5", "Codex CLI", "krinekk-os-schema-review", 19, "2d", "idle", "orbital-android")
+                Session(
+                    "2",
+                    "Codex CLI",
+                    "orbital-api-schema",
+                    8,
+                    "1h",
+                    "idle",
+                    "orbital-server",
+                    "~/dev/orbital/server",
+                    "codex"
+                ),
+                Session("3", "Claude Code", "fix-nightshift-flock", 32, "3h", "idle", "orbital-android", "~/dev/orbital-android", "claude"),
+                Session("4", "Claude Code", "northstar-vector-research", 47, "1d", "idle", "orbital-android", "~/dev/orbital-android", "claude"),
+                Session("5", "Codex CLI", "krinekk-os-schema-review", 19, "2d", "idle", "orbital-android", "~/dev/orbital-android", "codex")
             )
         )
         skills.addAll(

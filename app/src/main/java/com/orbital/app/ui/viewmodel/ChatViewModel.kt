@@ -9,6 +9,7 @@ import androidx.lifecycle.viewModelScope
 import com.orbital.app.data.OrbitalRepository
 import com.orbital.app.domain.ChatMessage
 import com.orbital.app.domain.ChatStreamEvent
+import com.orbital.app.domain.Session
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
@@ -24,14 +25,22 @@ class ChatViewModel @Inject constructor(
     var errorMessage by mutableStateOf<String?>(null)
 
     private var activeSessionId: String? = null
+    private var activeSession: Session? = null
     private var streamJob: Job? = null
 
-    fun bindSession(sessionId: String) {
+    fun bindSession(session: Session) {
+        val sessionId = session.id
         if (activeSessionId == sessionId && messages.isNotEmpty()) return
         activeSessionId = sessionId
+        activeSession = session
         messages.clear()
         viewModelScope.launch {
-            val history = repository.getSessionMessages(sessionId)
+            val history = repository.getSessionMessages(
+                sessionId = sessionId,
+                provider = session.provider,
+                projectName = session.projectName,
+                projectPath = session.projectPath
+            )
             if (history.isNotEmpty()) {
                 messages.addAll(history)
             }
@@ -40,6 +49,7 @@ class ChatViewModel @Inject constructor(
 
     fun sendMessage(content: String) {
         val sessionId = activeSessionId ?: return
+        val session = activeSession ?: return
         if (content.isBlank() || isStreaming) return
 
         val text = content.trim()
@@ -50,7 +60,7 @@ class ChatViewModel @Inject constructor(
         streamJob?.cancel()
         streamJob = viewModelScope.launch {
             var assistantIndex = -1
-            repository.sendMessageAndStream(sessionId, text) { event ->
+            repository.sendMessageAndStream(session, text) { event ->
                 when (event) {
                     is ChatStreamEvent.Output -> {
                         if (assistantIndex < 0) {

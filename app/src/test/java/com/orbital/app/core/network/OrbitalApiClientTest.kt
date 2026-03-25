@@ -91,7 +91,7 @@ class OrbitalApiClientTest {
         val api = clientFor(pathToBody = mapOf("/api/sessions/s1/messages" to payload))
         api.setBaseUrl("http://localhost:8080")
 
-        val messages = api.getSessionMessages("s1")
+        val messages = api.getSessionMessages("s1", "claude", "orbital-android", "/workspace/orbital-android")
         assertEquals(2, messages.size)
         assertEquals("u", messages[0].role)
         assertEquals("a", messages[1].role)
