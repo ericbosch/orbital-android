@@ -192,10 +192,10 @@ fun OrbitalNavigation(vm: MainViewModel, appearance: AppearanceSettings) {
             // ── Sub-screens ─────────────────────────────────────────
             composable(
                 route     = "chat/{sessionId}",
-                arguments = listOf(navArgument("sessionId") { type = NavType.IntType })
+                arguments = listOf(navArgument("sessionId") { type = NavType.StringType })
             ) { back ->
-                val id      = back.arguments?.getInt("sessionId") ?: return@composable
-                val session = vm.sessions.find { it.id == id }    ?: return@composable
+                val id      = back.arguments?.getString("sessionId") ?: return@composable
+                val session = vm.sessions.find { it.id == id }       ?: return@composable
                 ChatScreen(session = session, onBack = { navController.popBackStack() })
             }
             composable(

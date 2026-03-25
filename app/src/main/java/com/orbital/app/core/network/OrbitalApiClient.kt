@@ -2,91 +2,162 @@ package com.orbital.app.core.network
 
 import com.orbital.app.domain.Agent
 import com.orbital.app.domain.AgentStatus
+import com.orbital.app.domain.Project
 import com.orbital.app.domain.Session
 import com.orbital.app.domain.Skill
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
 import io.ktor.client.request.get
 import io.ktor.client.request.header
+import io.ktor.client.request.parameter
 import io.ktor.http.HttpHeaders
 import io.ktor.http.isSuccess
-import kotlinx.serialization.SerialName
-import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import javax.inject.Inject
-
-@Serializable
-data class AgentDto(
-    val id: String,
-    val name: String,
-    val model: String,
-    val status: String,
-    val sessions: Int,
-    val icon: String
-)
-
-@Serializable
-data class SessionDto(
-    val id: Int,
-    val agent: String,
-    val name: String,
-    val msgs: Int,
-    val ago: String,
-    val status: String
-)
-
-@Serializable
-data class SkillDto(
-    val name: String,
-    val tag: String,
-    @SerialName("on") val enabled: Boolean
-)
 
 class OrbitalApiClient @Inject constructor(private val client: HttpClient) {
 
     private var baseUrl: String = ""
     private var authToken: String = ""
 
-    fun setBaseUrl(url: String) { baseUrl = url }
+    fun setBaseUrl(url: String) { baseUrl = url.trimEnd('/') }
     fun setAuthToken(token: String) { authToken = token }
     fun getBaseUrl(): String = baseUrl
 
-    suspend fun ping(url: String, token: String): Boolean = try {
-        val response = client.get("$url/api/projects") {
-            if (token.isNotBlank()) header(HttpHeaders.Authorization, "Bearer $token")
+    suspend fun ping(url: String, token: String): Boolean {
+        val normalized = url.trimEnd('/')
+        return try {
+            client.get("$normalized/api/health") {
+                if (token.isNotBlank()) header(HttpHeaders.Authorization, "Bearer $token")
+            }.status.isSuccess()
+        } catch (_: Exception) {
+            try {
+                client.get("$normalized/api/projects") {
+                    if (token.isNotBlank()) header(HttpHeaders.Authorization, "Bearer $token")
+                }.status.isSuccess()
+            } catch (_: Exception) {
+                false
+            }
         }
-        response.status.isSuccess()
-    } catch (_: Exception) { false }
+    }
+
+    suspend fun getProjects(): List<Project> = try {
+        parseArrayBody(client.get("$baseUrl/api/projects") { authHeader() }.body())
+            .mapNotNull { it.toProject() }
+    } catch (_: Exception) {
+        emptyList()
+    }
 
     suspend fun getAgents(): List<Agent> = try {
-        client.get("$baseUrl/api/agents") {
-            if (authToken.isNotBlank()) header(HttpHeaders.Authorization, "Bearer $authToken")
-        }.body<List<AgentDto>>().map { it.toDomain() }
-    } catch (_: Exception) { emptyList() }
+        parseArrayBody(client.get("$baseUrl/api/agents") { authHeader() }.body())
+            .mapNotNull { it.toAgent() }
+    } catch (_: Exception) {
+        emptyList()
+    }
 
-    suspend fun getSessions(): List<Session> = try {
-        client.get("$baseUrl/api/sessions") {
-            if (authToken.isNotBlank()) header(HttpHeaders.Authorization, "Bearer $authToken")
-        }.body<List<SessionDto>>().map { it.toDomain() }
-    } catch (_: Exception) { emptyList() }
+    suspend fun getSessions(projectName: String? = null): List<Session> = try {
+        parseArrayBody(
+            client.get("$baseUrl/api/sessions") {
+                authHeader()
+                if (!projectName.isNullOrBlank()) parameter("projectName", projectName)
+            }.body()
+        ).mapNotNull { it.toSession() }
+    } catch (_: Exception) {
+        emptyList()
+    }
 
     suspend fun getSkills(): List<Skill> = try {
-        client.get("$baseUrl/api/skills") {
-            if (authToken.isNotBlank()) header(HttpHeaders.Authorization, "Bearer $authToken")
-        }.body<List<SkillDto>>().map { it.toDomain() }
-    } catch (_: Exception) { emptyList() }
+        parseArrayBody(client.get("$baseUrl/api/skills") { authHeader() }.body())
+            .mapNotNull { it.toSkill() }
+    } catch (_: Exception) {
+        emptyList()
+    }
 
-    private fun AgentDto.toDomain() = Agent(
-        id = id, name = name, model = model,
-        status = when (status) {
+    private fun io.ktor.client.request.HttpRequestBuilder.authHeader() {
+        if (authToken.isNotBlank()) header(HttpHeaders.Authorization, "Bearer $authToken")
+    }
+
+    private fun parseArrayBody(body: JsonElement): List<JsonObject> = when (body) {
+        is JsonArray -> body.mapNotNull { it as? JsonObject }
+        is JsonObject -> {
+            val nestedArray = listOf("data", "items", "projects", "sessions", "agents", "skills")
+                .firstNotNullOfOrNull { key -> body[key] as? JsonArray }
+            nestedArray?.mapNotNull { it as? JsonObject } ?: emptyList()
+        }
+        else -> emptyList()
+    }
+
+    private fun JsonObject.toProject(): Project? {
+        val name = string("name") ?: string("projectName") ?: return null
+        val path = string("path") ?: string("dir") ?: ""
+        val sessionCount = int("sessionCount") ?: int("sessions") ?: 0
+        return Project(name = name, path = path, sessionCount = sessionCount)
+    }
+
+    private fun JsonObject.toAgent(): Agent? {
+        val id = string("id") ?: string("slug") ?: return null
+        val name = string("name") ?: id.replaceFirstChar { it.uppercase() }
+        val model = string("model") ?: "unknown"
+        val status = when ((string("status") ?: "offline").lowercase()) {
             "active" -> AgentStatus.ACTIVE
-            "idle"   -> AgentStatus.IDLE
-            else     -> AgentStatus.OFFLINE
-        },
-        sessions = sessions, icon = icon
-    )
+            "idle" -> AgentStatus.IDLE
+            else -> AgentStatus.OFFLINE
+        }
+        val sessions = int("sessions") ?: int("sessionCount") ?: 0
+        val icon = string("icon") ?: "◎"
+        return Agent(id = id, name = name, model = model, status = status, sessions = sessions, icon = icon)
+    }
 
-    private fun SessionDto.toDomain() =
-        Session(id = id, agent = agent, name = name, msgs = msgs, ago = ago, status = status)
+    private fun JsonObject.toSession(): Session? {
+        val id = string("id") ?: int("id")?.toString() ?: string("sessionId") ?: return null
+        val agent = string("agent") ?: string("agentName") ?: "Unknown"
+        val name = string("name") ?: string("title") ?: id
+        val msgs = int("msgs") ?: int("messageCount") ?: int("messages") ?: 0
+        val status = (string("status") ?: "idle").lowercase()
+        val updatedAt = long("updatedAt") ?: long("updatedAtMs") ?: long("lastUpdated")
+        val ago = string("ago") ?: updatedAt?.let(::formatAgo) ?: "now"
+        val projectName = string("projectName") ?: string("project")
+        return Session(
+            id = id,
+            agent = agent,
+            name = name,
+            msgs = msgs,
+            ago = ago,
+            status = status,
+            projectName = projectName,
+            updatedAtMs = updatedAt
+        )
+    }
 
-    private fun SkillDto.toDomain() = Skill(name = name, tag = tag, enabled = enabled)
+    private fun JsonObject.toSkill(): Skill? {
+        val name = string("name") ?: return null
+        val tag = string("tag") ?: "general"
+        val enabled = bool("on") ?: bool("enabled") ?: false
+        return Skill(name = name, tag = tag, enabled = enabled)
+    }
+
+    private fun JsonObject.string(key: String): String? =
+        (this[key] as? JsonPrimitive)?.content?.takeIf { it.isNotBlank() }
+
+    private fun JsonObject.int(key: String): Int? =
+        (this[key] as? JsonPrimitive)?.content?.toIntOrNull()
+
+    private fun JsonObject.long(key: String): Long? =
+        (this[key] as? JsonPrimitive)?.content?.toLongOrNull()
+
+    private fun JsonObject.bool(key: String): Boolean? =
+        (this[key] as? JsonPrimitive)?.content?.toBooleanStrictOrNull()
+
+    private fun formatAgo(updatedAtMs: Long): String {
+        val seconds = ((System.currentTimeMillis() - updatedAtMs).coerceAtLeast(0L)) / 1000L
+        return when {
+            seconds < 60 -> "${seconds}s"
+            seconds < 3600 -> "${seconds / 60}m"
+            seconds < 86400 -> "${seconds / 3600}h"
+            else -> "${seconds / 86400}d"
+        }
+    }
 }

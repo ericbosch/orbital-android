@@ -6,6 +6,7 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import com.orbital.app.core.network.OrbitalApiClient
 import com.orbital.app.domain.Agent
+import com.orbital.app.domain.Project
 import com.orbital.app.domain.Session
 import com.orbital.app.domain.Skill
 import kotlinx.coroutines.flow.Flow
@@ -26,10 +27,9 @@ class OrbitalRepository @Inject constructor(
         private val SERVER_NAME = stringPreferencesKey("server_name")
     }
 
-    // ─── Persistence ─────────────────────────────────────────────
     fun getStoredServer(): Flow<StoredServer?> = dataStore.data.map { prefs ->
-        val url   = prefs[SERVER_URL]  ?: return@map null
-        val token = prefs[AUTH_TOKEN]  ?: return@map null
+        val url = prefs[SERVER_URL] ?: return@map null
+        val token = prefs[AUTH_TOKEN] ?: return@map null
         if (url.isNotBlank()) StoredServer(url, token) else null
     }
 
@@ -39,8 +39,8 @@ class OrbitalRepository @Inject constructor(
 
     suspend fun saveServer(url: String, token: String, name: String) {
         dataStore.edit { prefs ->
-            prefs[SERVER_URL]  = url
-            prefs[AUTH_TOKEN]  = token
+            prefs[SERVER_URL] = url
+            prefs[AUTH_TOKEN] = token
             prefs[SERVER_NAME] = name
         }
     }
@@ -53,13 +53,13 @@ class OrbitalRepository @Inject constructor(
         }
     }
 
-    // ─── API ──────────────────────────────────────────────────────
     suspend fun ping(url: String, token: String): Boolean = apiClient.ping(url, token)
 
-    fun setServerUrl(url: String)    = apiClient.setBaseUrl(url)
-    fun setAuthToken(token: String)  = apiClient.setAuthToken(token)
+    fun setServerUrl(url: String) = apiClient.setBaseUrl(url)
+    fun setAuthToken(token: String) = apiClient.setAuthToken(token)
 
-    suspend fun getAgents(): List<Agent>     = apiClient.getAgents()
-    suspend fun getSessions(): List<Session> = apiClient.getSessions()
-    suspend fun getSkills(): List<Skill>     = apiClient.getSkills()
+    suspend fun getProjects(): List<Project> = apiClient.getProjects()
+    suspend fun getAgents(): List<Agent> = apiClient.getAgents()
+    suspend fun getSessions(projectName: String? = null): List<Session> = apiClient.getSessions(projectName)
+    suspend fun getSkills(): List<Skill> = apiClient.getSkills()
 }

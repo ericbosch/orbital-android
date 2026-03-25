@@ -14,6 +14,7 @@ import com.orbital.app.data.OrbitalRepository
 import com.orbital.app.domain.Agent
 import com.orbital.app.domain.AgentStatus
 import com.orbital.app.domain.AppearanceSettings
+import com.orbital.app.domain.Project
 import com.orbital.app.domain.Session
 import com.orbital.app.domain.Skill
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -25,11 +26,12 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlin.system.measureTimeMillis
 import javax.inject.Inject
 
 sealed class ConnectionState {
-    object Idle : ConnectionState()
-    object Scanning : ConnectionState()
+    data object Idle : ConnectionState()
+    data object Scanning : ConnectionState()
     data class Connecting(val server: DiscoveredServer) : ConnectionState()
     data class Connected(val url: String, val name: String) : ConnectionState()
     data class Error(val message: String) : ConnectionState()
@@ -43,28 +45,26 @@ class MainViewModel @Inject constructor(
     private val tailscaleDiscovery: TailscaleDiscoveryService
 ) : ViewModel() {
 
-    // ─── Appearance ───────────────────────────────────────────────
     val appearance = appearanceStore.appearance.stateIn(
         scope = viewModelScope,
         started = SharingStarted.Eagerly,
         initialValue = AppearanceSettings()
     )
 
-    // ─── Connection state ─────────────────────────────────────────
     private val _connectionState = MutableStateFlow<ConnectionState>(ConnectionState.Idle)
     val connectionState: StateFlow<ConnectionState> = _connectionState.asStateFlow()
 
     private val _discoveredServers = MutableStateFlow<List<DiscoveredServer>>(emptyList())
     val discoveredServers: StateFlow<List<DiscoveredServer>> = _discoveredServers.asStateFlow()
 
-    // ─── Live data ────────────────────────────────────────────────
-    val agents   = mutableStateListOf<Agent>()
+    val projects = mutableStateListOf<Project>()
+    val agents = mutableStateListOf<Agent>()
     val sessions = mutableStateListOf<Session>()
-    val skills   = mutableStateListOf<Skill>()
+    val skills = mutableStateListOf<Skill>()
 
     var serverName by mutableStateOf("")
     var serverHost by mutableStateOf("")
-    var latencyMs  by mutableStateOf(0)
+    var latencyMs by mutableStateOf(0)
 
     private var scanJob: Job? = null
 
@@ -89,28 +89,21 @@ class MainViewModel @Inject constructor(
         }
     }
 
-    // ─── Scan ─────────────────────────────────────────────────────
     fun startScan() {
         _connectionState.value = ConnectionState.Scanning
         _discoveredServers.value = emptyList()
         scanJob?.cancel()
         scanJob = viewModelScope.launch {
-            // NSD (LAN, continuous flow)
             launch {
                 nsdDiscovery.discoverServers().collect { lan ->
-                    _discoveredServers.value =
-                        _discoveredServers.value.filter { it.via != "LAN" } + lan
+                    _discoveredServers.value = _discoveredServers.value.filter { it.via != "LAN" } + lan
                 }
             }
-            // Tailscale (one-shot: resolve saved server name via MagicDNS)
             launch {
                 val savedName = repository.getStoredServerName().firstOrNull() ?: ""
-                val ts = tailscaleDiscovery.discoverServers(
-                    savedHostnames = listOfNotNull(savedName.ifBlank { null })
-                )
+                val ts = tailscaleDiscovery.discoverServers(savedHostnames = listOfNotNull(savedName.ifBlank { null }))
                 if (ts.isNotEmpty()) {
-                    _discoveredServers.value =
-                        _discoveredServers.value.filter { it.via != "Tailscale" } + ts
+                    _discoveredServers.value = _discoveredServers.value.filter { it.via != "Tailscale" } + ts
                 }
             }
         }
@@ -123,13 +116,16 @@ class MainViewModel @Inject constructor(
         }
     }
 
-    // ─── Connect ──────────────────────────────────────────────────
     fun connect(server: DiscoveredServer, token: String) {
         viewModelScope.launch {
             stopScan()
             _connectionState.value = ConnectionState.Connecting(server)
             val url = "http://${server.host}:${server.port}"
-            val ok  = repository.ping(url, token)
+            var ok = false
+            latencyMs = measureTimeMillis {
+                ok = repository.ping(url, token)
+            }.toInt()
+
             if (ok) {
                 repository.saveServer(url, token, server.name)
                 repository.setServerUrl(url)
@@ -154,6 +150,7 @@ class MainViewModel @Inject constructor(
             repository.clearServer()
             serverName = ""
             serverHost = ""
+            projects.clear()
             _connectionState.value = ConnectionState.Idle
         }
     }
@@ -162,19 +159,43 @@ class MainViewModel @Inject constructor(
         _connectionState.value = ConnectionState.Idle
     }
 
-    // ─── Data refresh ─────────────────────────────────────────────
-    private fun refreshFromServer() {
+    fun refreshFromServer() {
         viewModelScope.launch {
-            val remoteAgents   = repository.getAgents()
-            val remoteSessions = repository.getSessions()
-            val remoteSkills   = repository.getSkills()
-            if (remoteAgents.isNotEmpty())   { agents.clear();   agents.addAll(remoteAgents)     }
-            if (remoteSessions.isNotEmpty()) { sessions.clear(); sessions.addAll(remoteSessions) }
-            if (remoteSkills.isNotEmpty())   { skills.clear();   skills.addAll(remoteSkills)     }
+            val remoteProjects = repository.getProjects()
+            if (remoteProjects.isNotEmpty()) {
+                projects.clear()
+                projects.addAll(remoteProjects)
+            }
+
+            val remoteAgents = repository.getAgents()
+            if (remoteAgents.isNotEmpty()) {
+                agents.clear()
+                agents.addAll(remoteAgents)
+            }
+
+            val loadedSessions = if (remoteProjects.isNotEmpty()) {
+                remoteProjects.flatMap { repository.getSessions(it.name) }
+            } else {
+                repository.getSessions()
+            }
+
+            if (loadedSessions.isNotEmpty()) {
+                sessions.clear()
+                sessions.addAll(
+                    loadedSessions
+                        .distinctBy { it.id }
+                        .sortedWith(compareByDescending<Session> { it.updatedAtMs ?: 0L }.thenByDescending { it.msgs })
+                )
+            }
+
+            val remoteSkills = repository.getSkills()
+            if (remoteSkills.isNotEmpty()) {
+                skills.clear()
+                skills.addAll(remoteSkills)
+            }
         }
     }
 
-    // ─── Appearance ───────────────────────────────────────────────
     fun updateAppearance(settings: AppearanceSettings) {
         viewModelScope.launch { appearanceStore.save(settings) }
     }
@@ -185,27 +206,38 @@ class MainViewModel @Inject constructor(
         }
     }
 
-    // ─── Mock data (shown until server responds) ──────────────────
     private fun loadMockData() {
-        agents.addAll(listOf(
-            Agent("claude", "Claude Code", "claude-opus-4-6",   AgentStatus.ACTIVE,  8, "◎"),
-            Agent("codex",  "Codex CLI",   "codex-mini-latest", AgentStatus.IDLE,    3, "◈"),
-            Agent("gemini", "Gemini CLI",  "gemini-2.5-pro",    AgentStatus.OFFLINE, 0, "◇"),
-            Agent("aider",  "Aider",       "gpt-4o",            AgentStatus.OFFLINE, 0, "◉"),
-        ))
-        sessions.addAll(listOf(
-            Session(1, "Claude Code", "refactor-auth-middleware",  14, "2m",  "active"),
-            Session(2, "Codex CLI",   "orbital-api-schema",         8, "1h",  "idle"),
-            Session(3, "Claude Code", "fix-nightshift-flock",      32, "3h",  "idle"),
-            Session(4, "Claude Code", "northstar-vector-research", 47, "1d",  "idle"),
-            Session(5, "Codex CLI",   "krinekk-os-schema-review",  19, "2d",  "idle"),
-        ))
-        skills.addAll(listOf(
-            Skill("Sequential Thinking", "reasoning", true),
-            Skill("Memory Summarizer",   "memory",    false),
-            Skill("Git Reviewer",        "git",       true),
-            Skill("Test Generator",      "testing",   false),
-            Skill("Doc Writer",          "docs",      false),
-        ))
+        agents.addAll(
+            listOf(
+                Agent("claude", "Claude Code", "claude-opus-4-6", AgentStatus.ACTIVE, 8, "◎"),
+                Agent("codex", "Codex CLI", "codex-mini-latest", AgentStatus.IDLE, 3, "◈"),
+                Agent("gemini", "Gemini CLI", "gemini-2.5-pro", AgentStatus.OFFLINE, 0, "◇"),
+                Agent("aider", "Aider", "gpt-4o", AgentStatus.OFFLINE, 0, "◉")
+            )
+        )
+        projects.addAll(
+            listOf(
+                Project("orbital-android", "~/dev/orbital-android", 3),
+                Project("orbital-server", "~/dev/orbital/server", 2)
+            )
+        )
+        sessions.addAll(
+            listOf(
+                Session("1", "Claude Code", "refactor-auth-middleware", 14, "2m", "active", "orbital-server"),
+                Session("2", "Codex CLI", "orbital-api-schema", 8, "1h", "idle", "orbital-server"),
+                Session("3", "Claude Code", "fix-nightshift-flock", 32, "3h", "idle", "orbital-android"),
+                Session("4", "Claude Code", "northstar-vector-research", 47, "1d", "idle", "orbital-android"),
+                Session("5", "Codex CLI", "krinekk-os-schema-review", 19, "2d", "idle", "orbital-android")
+            )
+        )
+        skills.addAll(
+            listOf(
+                Skill("Sequential Thinking", "reasoning", true),
+                Skill("Memory Summarizer", "memory", false),
+                Skill("Git Reviewer", "git", true),
+                Skill("Test Generator", "testing", false),
+                Skill("Doc Writer", "docs", false)
+            )
+        )
     }
 }
