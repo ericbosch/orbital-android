@@ -100,21 +100,21 @@ class OrbitalApiClientTest {
     @Test
     fun `parses search results`() = runBlocking {
         val payload = """
-            {
-              "items": [
-                {"id":"s-1","type":"session","title":"Refactor auth","subtitle":"Claude Code"},
-                {"id":"p-1","type":"project","title":"orbital-android","subtitle":"~/dev/orbital-android"}
-              ]
-            }
+            event: result
+            data: {"projectResult":{"projectName":"orbital-android","projectDisplayName":"Orbital Android","sessions":[{"sessionId":"s-1","provider":"claude","sessionSummary":"Refactor auth","matches":[{"snippet":"jwt middleware"}]}]}}
+            
+            event: done
+            data: {}
+            
         """.trimIndent()
 
-        val api = clientFor(pathToBody = mapOf("/api/search" to payload))
+        val api = clientFor(pathToBody = mapOf("/api/search/conversations" to payload))
         api.setBaseUrl("http://localhost:8080")
 
         val results = api.search("orbital")
-        assertEquals(2, results.size)
-        assertEquals("session", results[0].type)
-        assertEquals("project", results[1].type)
+        assertEquals(1, results.size)
+        assertEquals("claude", results[0].type)
+        assertEquals("Refactor auth", results[0].title)
     }
 
     private fun clientFor(pathToBody: Map<String, String>): OrbitalApiClient {

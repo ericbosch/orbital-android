@@ -10,6 +10,7 @@ import com.orbital.app.domain.Session
 import com.orbital.app.domain.Skill
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
+import io.ktor.client.statement.bodyAsText
 import io.ktor.client.plugins.websocket.webSocket
 import io.ktor.client.request.get
 import io.ktor.client.request.header
@@ -110,12 +111,12 @@ class OrbitalApiClient @Inject constructor(private val client: HttpClient) {
     }
 
     suspend fun search(query: String): List<SearchResult> = try {
-        parseArrayBody(
-            client.get("$baseUrl/api/search") {
-                authHeader()
-                parameter("q", query)
-            }.body()
-        ).mapNotNull { it.toSearchResult() }
+        val sseBody = client.get("$baseUrl/api/search/conversations") {
+            authHeader()
+            parameter("q", query)
+            parameter("limit", 50)
+        }.bodyAsText()
+        parseSearchSse(sseBody)
     } catch (_: Exception) {
         emptyList()
     }
@@ -311,6 +312,56 @@ class OrbitalApiClient @Inject constructor(private val client: HttpClient) {
         val title = string("title") ?: string("name") ?: id
         val subtitle = string("subtitle") ?: string("path") ?: string("agent") ?: ""
         return SearchResult(id = id, type = type, title = title, subtitle = subtitle)
+    }
+
+    private fun parseSearchSse(body: String): List<SearchResult> {
+        val results = mutableListOf<SearchResult>()
+        val lines = body.lineSequence().toList()
+        var currentEvent: String? = null
+        var currentData: String? = null
+
+        fun flushEvent() {
+            if (currentEvent != "result" || currentData.isNullOrBlank()) return
+            val eventObj = runCatching { json.parseToJsonElement(currentData!!) as? JsonObject }.getOrNull() ?: return
+            val projectResult = eventObj["projectResult"] as? JsonObject ?: return
+            val projectName = (projectResult["projectDisplayName"] as? JsonPrimitive)?.content
+                ?: (projectResult["projectName"] as? JsonPrimitive)?.content
+                ?: ""
+            val sessions = projectResult["sessions"] as? JsonArray ?: JsonArray(emptyList())
+            sessions.mapNotNull { it as? JsonObject }.forEach { session ->
+                val sessionId = (session["sessionId"] as? JsonPrimitive)?.content ?: return@forEach
+                val provider = (session["provider"] as? JsonPrimitive)?.content ?: "session"
+                val summary = (session["sessionSummary"] as? JsonPrimitive)?.content ?: sessionId
+                val matches = session["matches"] as? JsonArray
+                val firstSnippet = matches
+                    ?.mapNotNull { it as? JsonObject }
+                    ?.firstOrNull()
+                    ?.get("snippet")
+                    ?.let { it as? JsonPrimitive }
+                    ?.content
+                    ?: ""
+                results += SearchResult(
+                    id = "$provider:$sessionId",
+                    type = provider,
+                    title = summary,
+                    subtitle = listOf(projectName, firstSnippet).filter { it.isNotBlank() }.joinToString(" · ")
+                )
+            }
+        }
+
+        lines.forEach { line ->
+            when {
+                line.startsWith("event:") -> currentEvent = line.removePrefix("event:").trim()
+                line.startsWith("data:") -> currentData = line.removePrefix("data:").trim()
+                line.isBlank() -> {
+                    flushEvent()
+                    currentEvent = null
+                    currentData = null
+                }
+            }
+        }
+        flushEvent()
+        return results.distinctBy { it.id }
     }
 
     private fun JsonObject.string(key: String): String? =

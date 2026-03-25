@@ -248,8 +248,10 @@ class MainViewModel @Inject constructor(
             val agentsOk = repository.getAgents().isNotEmpty()
             diagnostics.add(DiagnosticCheck("Agents endpoint", agentsOk, "/api/agents"))
 
-            val sessionsOk = repository.getSessions().isNotEmpty()
-            diagnostics.add(DiagnosticCheck("Sessions endpoint", sessionsOk, "/api/sessions"))
+            val sessionsOk = projects
+                .ifEmpty { repository.getProjects() }
+                .any { repository.getSessions(it.name).isNotEmpty() }
+            diagnostics.add(DiagnosticCheck("Sessions endpoint", sessionsOk, "/api/projects/:projectName/sessions"))
 
             val skillsOk = repository.getSkills().isNotEmpty()
             diagnostics.add(DiagnosticCheck("Skills endpoint", skillsOk, "/api/skills"))
