@@ -20,6 +20,7 @@ import io.ktor.client.plugins.logging.Logging
 import io.ktor.client.plugins.websocket.WebSockets
 import io.ktor.serialization.kotlinx.json.json
 import kotlinx.serialization.json.Json
+import java.util.concurrent.TimeUnit
 import javax.inject.Singleton
 
 private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "orbital_prefs")
@@ -31,6 +32,15 @@ object AppModule {
     @Provides
     @Singleton
     fun provideHttpClient(): HttpClient = HttpClient(OkHttp) {
+        engine {
+            config {
+                connectTimeout(15, TimeUnit.SECONDS)
+                // Keep websocket streams alive for long-running model responses.
+                readTimeout(0, TimeUnit.MILLISECONDS)
+                writeTimeout(0, TimeUnit.MILLISECONDS)
+                callTimeout(0, TimeUnit.MILLISECONDS)
+            }
+        }
         install(ContentNegotiation) {
             json(Json { ignoreUnknownKeys = true })
         }

@@ -204,7 +204,7 @@ class ChatViewModel @Inject constructor(
 
     private companion object {
         const val PAGE_SIZE = 20
-        const val STREAM_FIRST_CHUNK_TIMEOUT_MS = 45_000L
-        const val STREAM_IDLE_TIMEOUT_MS = 90_000L
+        const val STREAM_FIRST_CHUNK_TIMEOUT_MS = 120_000L
+        const val STREAM_IDLE_TIMEOUT_MS = 180_000L
     }
 }
