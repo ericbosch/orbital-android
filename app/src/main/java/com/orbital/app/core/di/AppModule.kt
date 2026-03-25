@@ -35,6 +35,7 @@ object AppModule {
         engine {
             config {
                 connectTimeout(15, TimeUnit.SECONDS)
+                pingInterval(20, TimeUnit.SECONDS)
                 // Keep websocket streams alive for long-running model responses.
                 readTimeout(0, TimeUnit.MILLISECONDS)
                 writeTimeout(0, TimeUnit.MILLISECONDS)
@@ -44,7 +45,9 @@ object AppModule {
         install(ContentNegotiation) {
             json(Json { ignoreUnknownKeys = true })
         }
-        install(WebSockets)
+        install(WebSockets) {
+            maxFrameSize = Long.MAX_VALUE
+        }
         install(Logging) { level = LogLevel.BODY }
     }
 
