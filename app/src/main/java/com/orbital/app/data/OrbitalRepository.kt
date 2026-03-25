@@ -6,6 +6,8 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import com.orbital.app.core.network.OrbitalApiClient
 import com.orbital.app.domain.Agent
+import com.orbital.app.domain.ChatMessage
+import com.orbital.app.domain.ChatStreamEvent
 import com.orbital.app.domain.Project
 import com.orbital.app.domain.Session
 import com.orbital.app.domain.Skill
@@ -61,5 +63,11 @@ class OrbitalRepository @Inject constructor(
     suspend fun getProjects(): List<Project> = apiClient.getProjects()
     suspend fun getAgents(): List<Agent> = apiClient.getAgents()
     suspend fun getSessions(projectName: String? = null): List<Session> = apiClient.getSessions(projectName)
+    suspend fun getSessionMessages(sessionId: String): List<ChatMessage> = apiClient.getSessionMessages(sessionId)
+    suspend fun sendMessageAndStream(
+        sessionId: String,
+        content: String,
+        onEvent: (ChatStreamEvent) -> Unit
+    ) = apiClient.sendMessageAndStream(sessionId, content, onEvent)
     suspend fun getSkills(): List<Skill> = apiClient.getSkills()
 }

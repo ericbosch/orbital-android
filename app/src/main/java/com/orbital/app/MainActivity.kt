@@ -35,6 +35,7 @@ import com.orbital.app.ui.screens.onboarding.ReadyScreen
 import com.orbital.app.ui.screens.onboarding.ScanScreen
 import com.orbital.app.ui.screens.onboarding.Splash
 import com.orbital.app.ui.theme.OrbitalTheme
+import com.orbital.app.ui.viewmodel.ChatViewModel
 import com.orbital.app.ui.viewmodel.ConnectionState
 import com.orbital.app.ui.viewmodel.MainViewModel
 import dagger.hilt.android.AndroidEntryPoint
@@ -196,7 +197,16 @@ fun OrbitalNavigation(vm: MainViewModel, appearance: AppearanceSettings) {
             ) { back ->
                 val id      = back.arguments?.getString("sessionId") ?: return@composable
                 val session = vm.sessions.find { it.id == id }       ?: return@composable
-                ChatScreen(session = session, onBack = { navController.popBackStack() })
+                val chatVm: ChatViewModel = hiltViewModel()
+                LaunchedEffect(id) { chatVm.bindSession(id) }
+                ChatScreen(
+                    session = session,
+                    messages = chatVm.messages,
+                    isStreaming = chatVm.isStreaming,
+                    errorMessage = chatVm.errorMessage,
+                    onSendMessage = chatVm::sendMessage,
+                    onBack = { navController.popBackStack() }
+                )
             }
             composable(
                 route     = "agent/{agentId}",

@@ -3,7 +3,17 @@ package com.orbital.app.ui.screens.app
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -11,7 +21,12 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.Text
-import androidx.compose.runtime.*
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -28,35 +43,35 @@ import com.orbital.app.ui.theme.OrbitalTheme
 private val GREEN = Color(0xFF22C55E)
 
 private val MODELS = listOf(
-    "opus"   to "claude-opus-4-6",
+    "opus" to "claude-opus-4-6",
     "sonnet" to "claude-sonnet-4-6",
-    "haiku"  to "claude-haiku-4-5",
-    "codex"  to "codex-mini-latest",
-    "gpt4o"  to "gpt-4o",
-    "gemini" to "gemini-2.5-pro",
+    "haiku" to "claude-haiku-4-5",
+    "codex" to "codex-mini-latest",
+    "gpt4o" to "gpt-4o",
+    "gemini" to "gemini-2.5-pro"
 )
 private val MODES = listOf("chat", "code", "plan", "ask", "review")
 
 @Composable
-fun ChatScreen(session: Session, onBack: () -> Unit) {
-    val th   = OrbitalTheme.colors
+fun ChatScreen(
+    session: Session,
+    messages: List<ChatMessage>,
+    isStreaming: Boolean,
+    errorMessage: String?,
+    onSendMessage: (String) -> Unit,
+    onBack: () -> Unit
+) {
+    val th = OrbitalTheme.colors
     val mono = OrbitalTheme.fonts.mono
-    val ui   = OrbitalTheme.fonts.ui
-    val typ  = OrbitalTheme.typography
+    val ui = OrbitalTheme.fonts.ui
+    val typ = OrbitalTheme.typography
 
-    var input       by remember { mutableStateOf("") }
+    var input by remember { mutableStateOf("") }
     var activeModel by remember { mutableStateOf("opus") }
-    var activeMode  by remember { mutableStateOf("code") }
-    var showModel   by remember { mutableStateOf(false) }
-    var showSkills  by remember { mutableStateOf(false) }
-    val messages    = remember {
-        mutableStateListOf(
-            ChatMessage("u", "Refactoriza el middleware de auth para soportar JWT + RS256"),
-            ChatMessage("a", "Leyendo auth/middleware.ts…\n✓ Implementando RS256 key loading\n✓ Añadiendo verify middleware"),
-            ChatMessage("u", "Añade también refresh token rotation"),
-            ChatMessage("a", "Añadiendo /refresh endpoint con RTR y detección de reuse."),
-        )
-    }
+    var activeMode by remember { mutableStateOf("code") }
+    var showModel by remember { mutableStateOf(false) }
+    var showSkills by remember { mutableStateOf(false) }
+
     val listState = rememberLazyListState()
 
     LaunchedEffect(messages.size) {
@@ -64,29 +79,26 @@ fun ChatScreen(session: Session, onBack: () -> Unit) {
     }
 
     fun send() {
-        if (input.isBlank()) return
-        messages.add(ChatMessage("u", input))
+        if (input.isBlank() || isStreaming) return
+        onSendMessage(input)
         input = ""
-        // Simulate response
-        messages.add(ChatMessage("a", "Procesando…\n✓ Ejecutando cambios en el servidor"))
     }
 
     val modelLabel = MODELS.find { it.first == activeModel }?.second?.split("-")?.first() ?: "model"
 
     Box(modifier = Modifier.fillMaxSize()) {
         Column(modifier = Modifier.fillMaxSize()) {
-            // Header
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .border(width = 1.dp, color = th.border,
-                        shape = RoundedCornerShape(0.dp))
+                    .border(width = 1.dp, color = th.border, shape = RoundedCornerShape(0.dp))
                     .padding(horizontal = 14.dp, vertical = 10.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
                     text = "←",
-                    color = th.accentP, fontSize = 18.sp,
+                    color = th.accentP,
+                    fontSize = 18.sp,
                     modifier = Modifier
                         .clickable { onBack() }
                         .padding(8.dp)
@@ -96,21 +108,25 @@ fun ChatScreen(session: Session, onBack: () -> Unit) {
                     modifier = Modifier.weight(1f),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Dot(col = GREEN, ping = true)
+                    Dot(col = GREEN, ping = isStreaming)
                     Spacer(Modifier.width(6.dp))
                     Column {
                         Text(
                             text = session.agent,
                             style = typ.bodySmall.copy(
-                                color = th.text, fontWeight = FontWeight.Bold,
-                                fontSize = 11.sp, fontFamily = ui
+                                color = th.text,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 11.sp,
+                                fontFamily = ui
                             ),
                             maxLines = 1
                         )
                         Text(
                             text = session.name,
                             style = typ.labelSmall.copy(
-                                color = th.muted, fontSize = 7.5.sp, fontFamily = mono
+                                color = th.muted,
+                                fontSize = 7.5.sp,
+                                fontFamily = mono
                             ),
                             maxLines = 1
                         )
@@ -131,7 +147,6 @@ fun ChatScreen(session: Session, onBack: () -> Unit) {
                 }
             }
 
-            // Mode bar
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -140,15 +155,18 @@ fun ChatScreen(session: Session, onBack: () -> Unit) {
                 horizontalArrangement = Arrangement.spacedBy(5.dp)
             ) {
                 MODES.forEach { mode ->
-                    ChipButton(
-                        text = mode,
-                        active = activeMode == mode,
-                        onClick = { activeMode = mode }
-                    )
+                    ChipButton(text = mode, active = activeMode == mode, onClick = { activeMode = mode })
                 }
             }
 
-            // Messages
+            if (!errorMessage.isNullOrBlank()) {
+                Text(
+                    text = errorMessage,
+                    style = typ.labelSmall.copy(color = Color.Red, fontSize = 8.5.sp, fontFamily = mono),
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp)
+                )
+            }
+
             LazyColumn(
                 state = listState,
                 modifier = Modifier
@@ -168,33 +186,51 @@ fun ChatScreen(session: Session, onBack: () -> Unit) {
                                 .widthIn(max = 280.dp)
                                 .clip(
                                     RoundedCornerShape(
-                                        topStart = 14.dp, topEnd = 14.dp,
+                                        topStart = 14.dp,
+                                        topEnd = 14.dp,
                                         bottomStart = if (isUser) 14.dp else 3.dp,
                                         bottomEnd = if (isUser) 3.dp else 14.dp
                                     )
                                 )
                                 .background(if (isUser) th.accentI else th.raised)
                                 .then(
-                                    if (!isUser) Modifier.border(1.dp, th.border,
-                                        RoundedCornerShape(topStart = 14.dp, topEnd = 14.dp,
-                                            bottomStart = 3.dp, bottomEnd = 14.dp))
-                                    else Modifier
+                                    if (!isUser) {
+                                        Modifier.border(
+                                            1.dp,
+                                            th.border,
+                                            RoundedCornerShape(
+                                                topStart = 14.dp,
+                                                topEnd = 14.dp,
+                                                bottomStart = 3.dp,
+                                                bottomEnd = 14.dp
+                                            )
+                                        )
+                                    } else Modifier
                                 )
                                 .padding(horizontal = 12.dp, vertical = 9.dp)
                         ) {
                             Text(
                                 text = msg.text,
                                 style = typ.bodySmall.copy(
-                                    color = th.text, fontSize = 8.5.sp,
-                                    fontFamily = mono, lineHeight = 13.6.sp
+                                    color = th.text,
+                                    fontSize = 8.5.sp,
+                                    fontFamily = mono,
+                                    lineHeight = 13.6.sp
                                 )
                             )
                         }
                     }
                 }
+                if (isStreaming) {
+                    item {
+                        Text(
+                            text = "streaming...",
+                            style = typ.labelSmall.copy(color = th.muted, fontSize = 8.sp, fontFamily = mono)
+                        )
+                    }
+                }
             }
 
-            // Input bar
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -204,7 +240,6 @@ fun ChatScreen(session: Session, onBack: () -> Unit) {
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                // Input field
                 Box(
                     modifier = Modifier
                         .weight(1f)
@@ -215,28 +250,24 @@ fun ChatScreen(session: Session, onBack: () -> Unit) {
                 ) {
                     if (input.isEmpty()) {
                         Text(
-                            text = "message…",
-                            style = typ.bodySmall.copy(
-                                color = th.muted, fontSize = 9.sp, fontFamily = mono
-                            )
+                            text = if (isStreaming) "waiting for response..." else "message...",
+                            style = typ.bodySmall.copy(color = th.muted, fontSize = 9.sp, fontFamily = mono)
                         )
                     }
                     BasicTextField(
                         value = input,
                         onValueChange = { input = it },
-                        textStyle = typ.bodySmall.copy(
-                            color = th.text, fontSize = 9.sp, fontFamily = mono
-                        ),
+                        enabled = !isStreaming,
+                        textStyle = typ.bodySmall.copy(color = th.text, fontSize = 9.sp, fontFamily = mono),
                         cursorBrush = SolidColor(th.accentP),
                         modifier = Modifier.fillMaxWidth()
                     )
                 }
-                // Send button
                 Box(
                     modifier = Modifier
                         .size(44.dp)
-                        .background(th.accentI, CircleShape)
-                        .clickable { send() },
+                        .background(if (isStreaming) th.border else th.accentI, CircleShape)
+                        .clickable(enabled = !isStreaming) { send() },
                     contentAlignment = Alignment.Center
                 ) {
                     Text(text = "↑", color = Color.White, fontSize = 16.sp)
@@ -244,7 +275,6 @@ fun ChatScreen(session: Session, onBack: () -> Unit) {
             }
         }
 
-        // Model picker overlay
         if (showModel) {
             Box(
                 modifier = Modifier
@@ -260,7 +290,10 @@ fun ChatScreen(session: Session, onBack: () -> Unit) {
                     Text(
                         text = "SELECT MODEL",
                         style = typ.labelSmall.copy(
-                            color = th.muted, fontSize = 8.sp, fontFamily = mono, letterSpacing = 0.06.sp
+                            color = th.muted,
+                            fontSize = 8.sp,
+                            fontFamily = mono,
+                            letterSpacing = 0.06.sp
                         ),
                         modifier = Modifier.padding(bottom = 8.dp)
                     )
@@ -280,9 +313,7 @@ fun ChatScreen(session: Session, onBack: () -> Unit) {
                         ) {
                             Text(
                                 text = label,
-                                style = typ.labelSmall.copy(
-                                    color = th.text, fontSize = 8.5.sp, fontFamily = mono
-                                )
+                                style = typ.labelSmall.copy(color = th.text, fontSize = 8.5.sp, fontFamily = mono)
                             )
                         }
                     }
@@ -299,9 +330,9 @@ private fun ChipButton(
     onClick: () -> Unit,
     maxWidth: androidx.compose.ui.unit.Dp = androidx.compose.ui.unit.Dp.Unspecified
 ) {
-    val th   = OrbitalTheme.colors
+    val th = OrbitalTheme.colors
     val mono = OrbitalTheme.fonts.mono
-    val typ  = OrbitalTheme.typography
+    val typ = OrbitalTheme.typography
     Box(
         modifier = Modifier
             .then(if (maxWidth != androidx.compose.ui.unit.Dp.Unspecified) Modifier.widthIn(max = maxWidth) else Modifier)
@@ -315,7 +346,8 @@ private fun ChipButton(
             text = text,
             style = typ.labelSmall.copy(
                 color = if (active) th.text else th.muted,
-                fontSize = 7.5.sp, fontFamily = mono
+                fontSize = 7.5.sp,
+                fontFamily = mono
             ),
             maxLines = 1
         )

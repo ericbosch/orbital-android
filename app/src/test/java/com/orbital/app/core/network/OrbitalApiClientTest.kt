@@ -77,6 +77,26 @@ class OrbitalApiClientTest {
         assertEquals("cursor", agents[1].id)
     }
 
+    @Test
+    fun `parses session message history payload`() = runBlocking {
+        val payload = """
+            {
+              "messages": [
+                {"role":"user","content":"hola"},
+                {"role":"assistant","content":"que tal"}
+              ]
+            }
+        """.trimIndent()
+
+        val api = clientFor(pathToBody = mapOf("/api/sessions/s1/messages" to payload))
+        api.setBaseUrl("http://localhost:8080")
+
+        val messages = api.getSessionMessages("s1")
+        assertEquals(2, messages.size)
+        assertEquals("u", messages[0].role)
+        assertEquals("a", messages[1].role)
+    }
+
     private fun clientFor(pathToBody: Map<String, String>): OrbitalApiClient {
         val engine = MockEngine { request ->
             val path = request.url.encodedPath
