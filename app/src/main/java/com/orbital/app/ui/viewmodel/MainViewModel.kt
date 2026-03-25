@@ -72,6 +72,8 @@ class MainViewModel @Inject constructor(
     var authToken by mutableStateOf("")
     var isSearching by mutableStateOf(false)
     var diagnosticsRunning by mutableStateOf(false)
+    var restoredConnection by mutableStateOf(false)
+        private set
 
     private var scanJob: Job? = null
 
@@ -86,10 +88,12 @@ class MainViewModel @Inject constructor(
                 if (stored != null && _connectionState.value is ConnectionState.Idle) {
                     repository.setServerUrl(stored.url)
                     repository.setAuthToken(stored.token)
-                    val name = stored.url.removePrefix("http://").substringBefore(":")
+                    val host = stored.url.removePrefix("http://").substringBefore(":")
+                    val name = stored.name.ifBlank { host }
                     serverHost = stored.url.removePrefix("http://").substringBefore(":")
                     serverName = name
                     authToken = stored.token
+                    restoredConnection = true
                     _connectionState.value = ConnectionState.Connected(stored.url, name)
                     refreshFromServer()
                 }
@@ -141,6 +145,7 @@ class MainViewModel @Inject constructor(
                 authToken = token
                 serverName = server.name
                 serverHost = server.host
+                restoredConnection = false
                 _connectionState.value = ConnectionState.Connected(url, server.name)
                 refreshFromServer()
             } else {
@@ -176,6 +181,7 @@ class MainViewModel @Inject constructor(
             serverName = ""
             serverHost = ""
             authToken = ""
+            restoredConnection = false
             projects.clear()
             searchResults.clear()
             diagnostics.clear()

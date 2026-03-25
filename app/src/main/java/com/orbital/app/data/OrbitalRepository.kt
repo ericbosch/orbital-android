@@ -17,7 +17,7 @@ import kotlinx.coroutines.flow.map
 import javax.inject.Inject
 import javax.inject.Singleton
 
-data class StoredServer(val url: String, val token: String)
+data class StoredServer(val url: String, val token: String, val name: String)
 
 @Singleton
 class OrbitalRepository @Inject constructor(
@@ -33,7 +33,8 @@ class OrbitalRepository @Inject constructor(
     fun getStoredServer(): Flow<StoredServer?> = dataStore.data.map { prefs ->
         val url = prefs[SERVER_URL] ?: return@map null
         val token = prefs[AUTH_TOKEN] ?: return@map null
-        if (url.isNotBlank()) StoredServer(url, token) else null
+        val name = prefs[SERVER_NAME] ?: ""
+        if (url.isNotBlank()) StoredServer(url, token, name) else null
     }
 
     fun getStoredServerName(): Flow<String> = dataStore.data.map { prefs ->

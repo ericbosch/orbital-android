@@ -104,6 +104,13 @@ fun OrbitalNavigation(vm: MainViewModel, appearance: AppearanceSettings) {
             // ── Onboarding ──────────────────────────────────────────
             composable("splash") {
                 val connectionState by vm.connectionState.collectAsState()
+                LaunchedEffect(connectionState, vm.restoredConnection) {
+                    if (connectionState is ConnectionState.Connected && vm.restoredConnection) {
+                        navController.navigate("home") {
+                            popUpTo("splash") { inclusive = true }
+                        }
+                    }
+                }
                 Splash(onNext = {
                     if (connectionState is ConnectionState.Connected) {
                         navController.navigate("home") {
@@ -119,7 +126,8 @@ fun OrbitalNavigation(vm: MainViewModel, appearance: AppearanceSettings) {
                 val connectionState   by vm.connectionState.collectAsState()
                 LaunchedEffect(connectionState) {
                     if (connectionState is ConnectionState.Connected) {
-                        navController.navigate("detect") {
+                        val target = if (vm.restoredConnection) "home" else "detect"
+                        navController.navigate(target) {
                             popUpTo("scan") { inclusive = true }
                         }
                     }
