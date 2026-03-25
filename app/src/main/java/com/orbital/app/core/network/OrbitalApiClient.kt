@@ -189,12 +189,18 @@ class OrbitalApiClient @Inject constructor(private val client: HttpClient) {
                 )
                 send(Frame.Text(json.encodeToString(JsonObject.serializer(), payload)))
 
+                var pendingLine = ""
                 for (frame in incoming) {
                     if (frame !is Frame.Text) continue
-                    val chunks = frame.readText().split('\n').filter { it.isNotBlank() }
-                    chunks.forEach { line ->
+                    val payloadText = pendingLine + frame.readText()
+                    val lines = payloadText.split('\n')
+                    pendingLine = lines.lastOrNull().orEmpty()
+                    lines.dropLast(1).forEach { line ->
                         onEvent(parseStreamEvent(line))
                     }
+                }
+                if (pendingLine.isNotBlank()) {
+                    onEvent(parseStreamEvent(pendingLine))
                 }
             }
         } catch (e: Exception) {
@@ -216,6 +222,7 @@ class OrbitalApiClient @Inject constructor(private val client: HttpClient) {
         val trimmed = line.trim()
         if (trimmed.isBlank()) return ChatStreamEvent.Noop
         if (trimmed.startsWith("event:") || trimmed.startsWith("data:")) return ChatStreamEvent.Noop
+        if (trimmed in IGNORED_STREAM_MARKERS) return ChatStreamEvent.Noop
 
         return try {
             val obj = json.parseToJsonElement(trimmed) as? JsonObject ?: return ChatStreamEvent.Output(trimmed)
@@ -288,6 +295,17 @@ class OrbitalApiClient @Inject constructor(private val client: HttpClient) {
         }
 
         return ""
+    }
+
+    private companion object {
+        val IGNORED_STREAM_MARKERS = setOf(
+            "token_budget",
+            "usage",
+            "metrics",
+            "heartbeat",
+            "ping",
+            "pong"
+        )
     }
 
     private fun io.ktor.client.request.HttpRequestBuilder.authHeader() {

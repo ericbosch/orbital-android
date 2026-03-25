@@ -139,6 +139,13 @@ class OrbitalApiClientTest {
         assertEquals(ChatStreamEvent.Noop, event)
     }
 
+    @Test
+    fun `stream parser ignores marker lines`() {
+        val api = clientFor(emptyMap())
+        val event = api.parseStreamEvent("token_budget")
+        assertEquals(ChatStreamEvent.Noop, event)
+    }
+
     private fun clientFor(pathToBody: Map<String, String>): OrbitalApiClient {
         val engine = MockEngine { request ->
             val path = request.url.encodedPath
