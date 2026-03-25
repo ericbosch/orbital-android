@@ -26,6 +26,7 @@ import io.ktor.websocket.Frame
 import io.ktor.websocket.readText
 import io.ktor.websocket.send
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -166,6 +167,14 @@ class OrbitalApiClient @Inject constructor(private val client: HttpClient) {
             }
         }
 
+        val isBusy = checkSessionBusy(wsUrl, session)
+        if (isBusy) {
+            val msg = "La sesión está activa en otro cliente. Abre una sesión nueva en Orbital para enviar mensajes."
+            Log.e(logTag, "session busy session=$sessionId provider=${session.provider}")
+            onEvent(ChatStreamEvent.Error(msg))
+            return
+        }
+
         var wsError: Exception? = null
         repeat(2) { attempt ->
             try {
@@ -205,6 +214,43 @@ class OrbitalApiClient @Inject constructor(private val client: HttpClient) {
             Log.e(logTag, "fallback REST failed session=$sessionId: ${fallbackErr.message}")
             onEvent(ChatStreamEvent.Error(wsError?.message ?: fallbackErr.message ?: "stream failed"))
         }
+    }
+
+    private suspend fun checkSessionBusy(wsUrl: String, session: Session): Boolean {
+        // Codex/Cursor/Gemini sessions can be occupied by another connected client.
+        if (session.provider.lowercase() !in setOf("codex", "cursor", "gemini", "claude")) return false
+
+        var isBusy = false
+        return runCatching {
+            client.webSocket(urlString = wsUrl) {
+                val payload = JsonObject(
+                    mapOf(
+                        "type" to JsonPrimitive("check-session-status"),
+                        "provider" to JsonPrimitive(session.provider),
+                        "sessionId" to JsonPrimitive(session.id)
+                    )
+                )
+                send(Frame.Text(json.encodeToString(JsonObject.serializer(), payload)))
+
+                val statusObj = withTimeoutOrNull(1500L) {
+                    for (frame in incoming) {
+                        if (frame !is Frame.Text) continue
+                        val lines = frame.readText().split('\n').map { it.trim() }.filter { it.isNotBlank() }
+                        for (line in lines) {
+                            val obj = runCatching { json.parseToJsonElement(line) as? JsonObject }.getOrNull() ?: continue
+                            val type = obj.string("type")?.lowercase() ?: continue
+                            if (type == "session-status") return@withTimeoutOrNull obj
+                        }
+                    }
+                    null
+                } as? JsonObject
+
+                isBusy = statusObj?.get("isProcessing")
+                    ?.let { (it as? JsonPrimitive)?.content?.toBooleanStrictOrNull() }
+                    ?: false
+            }
+            isBusy
+        }.getOrDefault(false)
     }
 
     private suspend fun streamViaWebSocket(
