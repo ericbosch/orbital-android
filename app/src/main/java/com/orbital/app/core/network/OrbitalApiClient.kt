@@ -81,7 +81,29 @@ class OrbitalApiClient @Inject constructor(private val client: HttpClient) {
         }
         parseArrayBody(
             client.get(url) { authHeader() }.body()
-        ).mapNotNull { it.toSession(defaultProjectName = projectName) }
+        ).mapNotNull { it.toSession(defaultProjectName = projectName, defaultProvider = "claude") }
+    } catch (_: Exception) {
+        emptyList()
+    }
+
+    suspend fun getCodexSessions(projectPath: String): List<Session> = try {
+        parseArrayBody(
+            client.get("$baseUrl/api/codex/sessions") {
+                authHeader()
+                parameter("projectPath", projectPath)
+            }.body()
+        ).mapNotNull { it.toSession(defaultProvider = "codex", defaultProjectPath = projectPath) }
+    } catch (_: Exception) {
+        emptyList()
+    }
+
+    suspend fun getCursorSessions(projectPath: String): List<Session> = try {
+        parseArrayBody(
+            client.get("$baseUrl/api/cursor/sessions") {
+                authHeader()
+                parameter("projectPath", projectPath)
+            }.body()
+        ).mapNotNull { it.toSession(defaultProvider = "cursor", defaultProjectPath = projectPath) }
     } catch (_: Exception) {
         emptyList()
     }
@@ -261,9 +283,14 @@ class OrbitalApiClient @Inject constructor(private val client: HttpClient) {
         return Agent(id = id, name = name, model = model, status = status, sessions = sessions, icon = icon)
     }
 
-    private fun JsonObject.toSession(defaultProjectName: String? = null): Session? {
+    private fun JsonObject.toSession(
+        defaultProjectName: String? = null,
+        defaultProvider: String = "claude",
+        defaultProjectPath: String? = null
+    ): Session? {
         val id = string("id") ?: int("id")?.toString() ?: string("sessionId") ?: return null
-        val agent = string("agent") ?: string("agentName") ?: string("provider") ?: "Unknown"
+        val provider = string("provider") ?: defaultProvider
+        val agent = string("agent") ?: string("agentName") ?: providerLabel(provider)
         val name = string("name") ?: string("title") ?: string("summary") ?: id
         val msgs = int("msgs") ?: int("messageCount") ?: int("messages") ?: 0
         val status = (string("status") ?: "idle").lowercase()
@@ -271,8 +298,7 @@ class OrbitalApiClient @Inject constructor(private val client: HttpClient) {
             ?: parseDateMillis(string("lastActivity"))
         val ago = string("ago") ?: updatedAt?.let(::formatAgo) ?: "now"
         val projectName = string("projectName") ?: string("project") ?: defaultProjectName
-        val projectPath = string("cwd") ?: string("projectPath")
-        val provider = string("provider") ?: inferProvider(agent)
+        val projectPath = string("cwd") ?: string("projectPath") ?: defaultProjectPath
         return Session(
             id = id,
             agent = agent,
@@ -384,6 +410,13 @@ class OrbitalApiClient @Inject constructor(private val client: HttpClient) {
             "gemini" in lower -> "gemini"
             else -> "claude"
         }
+    }
+
+    private fun providerLabel(provider: String): String = when (provider.lowercase()) {
+        "codex" -> "Codex CLI"
+        "cursor" -> "Cursor"
+        "gemini" -> "Gemini CLI"
+        else -> "Claude Code"
     }
 
     private fun parseDateMillis(value: String?): Long? =

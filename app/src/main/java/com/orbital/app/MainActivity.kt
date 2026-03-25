@@ -58,7 +58,8 @@ fun OrbitalRoot() {
     OrbitalTheme(
         themeName  = appearance.themeName,
         accentName = appearance.accentName,
-        fontName   = appearance.fontName
+        fontName   = appearance.fontName,
+        fontSize   = appearance.fontSize
     ) {
         Surface(
             modifier = Modifier.fillMaxSize(),

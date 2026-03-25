@@ -8,6 +8,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 
@@ -68,6 +70,7 @@ fun OrbitalTheme(
     themeName: String = "dark",
     accentName: String = "indigo",
     fontName: String = "Syne / JetBrains",
+    fontSize: Int = 11,
     content: @Composable () -> Unit
 ) {
     val th = when (themeName) {
@@ -93,6 +96,10 @@ fun OrbitalTheme(
         "Mono everywhere"  -> OrbitalFonts(ui = JetBrainsMono, mono = JetBrainsMono)
         else               -> OrbitalFonts(ui = Syne,         mono = JetBrainsMono)
     }
+    val baseTypography = orbitalTypography(uiFont = orbitalFonts.ui, monoFont = orbitalFonts.mono)
+    val density = LocalDensity.current
+    val fontScaleFactor = (fontSize.coerceIn(10, 16) / 11f)
+    val themedDensity = Density(density = density.density, fontScale = density.fontScale * fontScaleFactor)
 
     val orbitalColors = OrbitalColors(
         void = th[0] as Color,
@@ -128,10 +135,11 @@ fun OrbitalTheme(
     CompositionLocalProvider(
         LocalOrbitalColors provides orbitalColors,
         LocalOrbitalFonts provides orbitalFonts,
+        LocalDensity provides themedDensity
     ) {
         MaterialTheme(
             colorScheme = materialColorScheme,
-            typography = Typography,
+            typography = baseTypography,
             content = content
         )
     }

@@ -64,6 +64,8 @@ class OrbitalRepository @Inject constructor(
     suspend fun getProjects(): List<Project> = apiClient.getProjects()
     suspend fun getAgents(): List<Agent> = apiClient.getAgents()
     suspend fun getSessions(projectName: String? = null): List<Session> = apiClient.getSessions(projectName)
+    suspend fun getCodexSessions(projectPath: String): List<Session> = apiClient.getCodexSessions(projectPath)
+    suspend fun getCursorSessions(projectPath: String): List<Session> = apiClient.getCursorSessions(projectPath)
     suspend fun getSessionMessages(
         sessionId: String,
         provider: String,

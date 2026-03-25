@@ -205,12 +205,28 @@ class MainViewModel @Inject constructor(
 
             val loadedSessions = if (remoteProjects.isNotEmpty()) {
                 remoteProjects.flatMap { project ->
-                    repository.getSessions(project.name).map { session ->
+                    val claude = repository.getSessions(project.name).map { session ->
                         session.copy(
                             projectName = session.projectName ?: project.name,
-                            projectPath = session.projectPath ?: project.path
+                            projectPath = session.projectPath ?: project.path,
+                            provider = if (session.provider.isBlank()) "claude" else session.provider
                         )
                     }
+                    val codex = repository.getCodexSessions(project.path).map { session ->
+                        session.copy(
+                            projectName = session.projectName ?: project.name,
+                            projectPath = session.projectPath ?: project.path,
+                            provider = "codex"
+                        )
+                    }
+                    val cursor = repository.getCursorSessions(project.path).map { session ->
+                        session.copy(
+                            projectName = session.projectName ?: project.name,
+                            projectPath = session.projectPath ?: project.path,
+                            provider = "cursor"
+                        )
+                    }
+                    claude + codex + cursor
                 }
             } else {
                 repository.getSessions()
