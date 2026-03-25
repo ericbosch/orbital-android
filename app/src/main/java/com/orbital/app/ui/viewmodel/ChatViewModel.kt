@@ -63,6 +63,7 @@ class ChatViewModel @Inject constructor(
             repository.sendMessageAndStream(session, text) { event ->
                 when (event) {
                     is ChatStreamEvent.Output -> {
+                        if (event.text.isLikelyRawJsonBlob()) return@sendMessageAndStream
                         if (assistantIndex < 0) {
                             messages.add(ChatMessage(role = "a", text = event.text))
                             assistantIndex = messages.lastIndex
@@ -92,6 +93,8 @@ class ChatViewModel @Inject constructor(
                         errorMessage = event.message
                         isStreaming = false
                     }
+
+                    is ChatStreamEvent.Noop -> Unit
                 }
             }
             if (isStreaming) {
@@ -104,5 +107,12 @@ class ChatViewModel @Inject constructor(
     override fun onCleared() {
         streamJob?.cancel()
         super.onCleared()
+    }
+
+    private fun String.isLikelyRawJsonBlob(): Boolean {
+        val value = trim()
+        if (value.length < 180) return false
+        if (!(value.startsWith("{") && value.endsWith("}"))) return false
+        return value.contains("\"type\"") || value.contains("\"kind\"") || value.contains("\"event\"")
     }
 }

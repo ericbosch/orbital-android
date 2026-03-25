@@ -13,6 +13,7 @@ import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import com.orbital.app.domain.ChatStreamEvent
 
 class OrbitalApiClientTest {
 
@@ -115,6 +116,27 @@ class OrbitalApiClientTest {
         assertEquals(1, results.size)
         assertEquals("claude", results[0].type)
         assertEquals("Refactor auth", results[0].title)
+    }
+
+    @Test
+    fun `stream parser returns output for assistant text event`() {
+        val api = clientFor(emptyMap())
+        val event = api.parseStreamEvent("""{"type":"output","text":"hola"}""")
+        assertEquals(ChatStreamEvent.Output("hola"), event)
+    }
+
+    @Test
+    fun `stream parser ignores unknown json envelopes`() {
+        val api = clientFor(emptyMap())
+        val event = api.parseStreamEvent("""{"type":"session_state","state":"running","sessionId":"abc"}""")
+        assertEquals(ChatStreamEvent.Noop, event)
+    }
+
+    @Test
+    fun `stream parser ignores sse metadata lines`() {
+        val api = clientFor(emptyMap())
+        val event = api.parseStreamEvent("event: result")
+        assertEquals(ChatStreamEvent.Noop, event)
     }
 
     private fun clientFor(pathToBody: Map<String, String>): OrbitalApiClient {

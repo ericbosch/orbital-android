@@ -178,7 +178,7 @@ class OrbitalApiClient @Inject constructor(private val client: HttpClient) {
                         "options" to JsonObject(
                             buildMap {
                                 put("sessionId", JsonPrimitive(sessionId))
-                                put("resume", JsonPrimitive(true))
+                                put("resume", JsonPrimitive(false))
                                 if (!session.projectPath.isNullOrBlank()) {
                                     put("projectPath", JsonPrimitive(session.projectPath))
                                     put("cwd", JsonPrimitive(session.projectPath))
@@ -212,20 +212,26 @@ class OrbitalApiClient @Inject constructor(private val client: HttpClient) {
         }
     }
 
-    private fun parseStreamEvent(line: String): ChatStreamEvent {
+    internal fun parseStreamEvent(line: String): ChatStreamEvent {
+        val trimmed = line.trim()
+        if (trimmed.isBlank()) return ChatStreamEvent.Noop
+        if (trimmed.startsWith("event:") || trimmed.startsWith("data:")) return ChatStreamEvent.Noop
+
         return try {
-            val obj = json.parseToJsonElement(line) as? JsonObject ?: return ChatStreamEvent.Output(line)
-            val kind = (obj.string("kind") ?: obj.string("type") ?: "output").lowercase()
+            val obj = json.parseToJsonElement(trimmed) as? JsonObject ?: return ChatStreamEvent.Output(trimmed)
+            val kind = (obj.string("kind") ?: obj.string("type") ?: obj.string("event") ?: "").lowercase()
             when (kind) {
-                "output", "delta", "stream_delta" -> ChatStreamEvent.Output(
-                    obj.string("text") ?: obj.string("content") ?: obj.string("delta") ?: obj.string("data") ?: ""
-                )
+                "output", "delta", "stream_delta", "text_delta" -> {
+                    val text = obj.extractAssistantText()
+                    if (text.isNotBlank()) ChatStreamEvent.Output(text) else ChatStreamEvent.Noop
+                }
                 "text" -> {
                     val role = (obj.string("role") ?: "assistant").lowercase()
                     if (role == "assistant") {
-                        ChatStreamEvent.Output(obj.string("content") ?: obj.string("text") ?: "")
+                        val text = obj.extractAssistantText()
+                        if (text.isNotBlank()) ChatStreamEvent.Output(text) else ChatStreamEvent.Noop
                     } else {
-                        ChatStreamEvent.Output("")
+                        ChatStreamEvent.Noop
                     }
                 }
                 "tool_use" -> ChatStreamEvent.ToolUse(
@@ -234,11 +240,54 @@ class OrbitalApiClient @Inject constructor(private val client: HttpClient) {
                 )
                 "done", "complete", "stream_end" -> ChatStreamEvent.Done
                 "error" -> ChatStreamEvent.Error(obj.string("message") ?: obj.string("content") ?: "unknown error")
-                else -> ChatStreamEvent.Output(obj.string("text") ?: line)
+                else -> {
+                    val text = obj.extractAssistantText()
+                    if (text.isNotBlank()) ChatStreamEvent.Output(text) else ChatStreamEvent.Noop
+                }
             }
         } catch (_: Exception) {
-            ChatStreamEvent.Output(line)
+            // Keep genuine plain-text chunks, but ignore malformed JSON-ish payloads.
+            if (trimmed.startsWith("{") || trimmed.startsWith("[")) ChatStreamEvent.Noop else ChatStreamEvent.Output(trimmed)
         }
+    }
+
+    private fun JsonObject.extractAssistantText(): String {
+        val explicitRole = string("role")?.lowercase()
+        if (!explicitRole.isNullOrBlank() && explicitRole != "assistant") return ""
+
+        string("text")?.takeIf { it.isNotBlank() }?.let { return it }
+        string("content")?.takeIf { it.isNotBlank() }?.let { return it }
+        string("delta")?.takeIf { it.isNotBlank() }?.let { return it }
+        string("data")?.takeIf { it.isNotBlank() }?.let { return it }
+
+        val deltaObj = this["delta"] as? JsonObject
+        deltaObj?.string("text")?.takeIf { it.isNotBlank() }?.let { return it }
+        deltaObj?.string("content")?.takeIf { it.isNotBlank() }?.let { return it }
+
+        val payloadObj = this["payload"] as? JsonObject
+        payloadObj?.string("text")?.takeIf { it.isNotBlank() }?.let { return it }
+        payloadObj?.string("content")?.takeIf { it.isNotBlank() }?.let { return it }
+
+        val contentArray = this["content"] as? JsonArray
+        if (contentArray != null) {
+            val chunk = contentArray.asSequence()
+                .mapNotNull { it as? JsonObject }
+                .mapNotNull { part ->
+                    val type = part.string("type")?.lowercase()
+                    when (type) {
+                        null, "", "text", "output_text", "text_delta" -> {
+                            part.string("text")
+                                ?: (part["text"] as? JsonObject)?.string("value")
+                                ?: part.string("content")
+                        }
+                        else -> null
+                    }
+                }
+                .firstOrNull { it.isNotBlank() }
+            if (!chunk.isNullOrBlank()) return chunk
+        }
+
+        return ""
     }
 
     private fun io.ktor.client.request.HttpRequestBuilder.authHeader() {
