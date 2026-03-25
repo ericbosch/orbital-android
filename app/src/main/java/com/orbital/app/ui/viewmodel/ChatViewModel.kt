@@ -23,10 +23,16 @@ class ChatViewModel @Inject constructor(
     val messages = mutableStateListOf<ChatMessage>()
     var isStreaming by mutableStateOf(false)
     var errorMessage by mutableStateOf<String?>(null)
+    var hasOlderMessages by mutableStateOf(false)
+        private set
+    var isLoadingOlder by mutableStateOf(false)
+        private set
 
     private var activeSessionId: String? = null
     private var activeSession: Session? = null
     private var streamJob: Job? = null
+    private val fullHistory = mutableListOf<ChatMessage>()
+    private var loadedStartIndex: Int = 0
 
     fun bindSession(session: Session) {
         val sessionId = session.id
@@ -34,6 +40,10 @@ class ChatViewModel @Inject constructor(
         activeSessionId = sessionId
         activeSession = session
         messages.clear()
+        fullHistory.clear()
+        loadedStartIndex = 0
+        hasOlderMessages = false
+        isLoadingOlder = false
         viewModelScope.launch {
             val history = repository.getSessionMessages(
                 sessionId = sessionId,
@@ -41,9 +51,25 @@ class ChatViewModel @Inject constructor(
                 projectName = session.projectName,
                 projectPath = session.projectPath
             )
-            if (history.isNotEmpty()) {
-                messages.addAll(history)
+            fullHistory.addAll(history)
+            loadedStartIndex = (fullHistory.size - PAGE_SIZE).coerceAtLeast(0)
+            if (fullHistory.isNotEmpty()) messages.addAll(fullHistory.subList(loadedStartIndex, fullHistory.size))
+            hasOlderMessages = loadedStartIndex > 0
+        }
+    }
+
+    fun loadOlderMessages() {
+        if (isLoadingOlder || !hasOlderMessages) return
+        isLoadingOlder = true
+        viewModelScope.launch {
+            val nextStart = (loadedStartIndex - PAGE_SIZE).coerceAtLeast(0)
+            if (nextStart < loadedStartIndex) {
+                val olderChunk = fullHistory.subList(nextStart, loadedStartIndex)
+                messages.addAll(0, olderChunk)
+                loadedStartIndex = nextStart
+                hasOlderMessages = loadedStartIndex > 0
             }
+            isLoadingOlder = false
         }
     }
 
@@ -53,23 +79,33 @@ class ChatViewModel @Inject constructor(
         if (content.isBlank() || isStreaming) return
 
         val text = content.trim()
-        messages.add(ChatMessage(role = "u", text = text))
+        val userMessage = ChatMessage(role = "u", text = text)
+        messages.add(userMessage)
+        fullHistory.add(userMessage)
         isStreaming = true
         errorMessage = null
 
         streamJob?.cancel()
         streamJob = viewModelScope.launch {
             var assistantIndex = -1
+            var assistantFullIndex = -1
             repository.sendMessageAndStream(session, text) { event ->
                 when (event) {
                     is ChatStreamEvent.Output -> {
                         if (event.text.isLikelyRawJsonBlob()) return@sendMessageAndStream
                         if (assistantIndex < 0) {
-                            messages.add(ChatMessage(role = "a", text = event.text))
+                            val assistantMessage = ChatMessage(role = "a", text = event.text)
+                            messages.add(assistantMessage)
                             assistantIndex = messages.lastIndex
+                            fullHistory.add(assistantMessage)
+                            assistantFullIndex = fullHistory.lastIndex
                         } else {
                             val prev = messages[assistantIndex]
                             messages[assistantIndex] = prev.copy(text = prev.text + event.text)
+                            if (assistantFullIndex >= 0) {
+                                val fullPrev = fullHistory[assistantFullIndex]
+                                fullHistory[assistantFullIndex] = fullPrev.copy(text = fullPrev.text + event.text)
+                            }
                         }
                     }
 
@@ -82,7 +118,9 @@ class ChatViewModel @Inject constructor(
                                 append(event.inputSummary)
                             }
                         }
-                        messages.add(ChatMessage(role = "a", text = toolText))
+                        val toolMessage = ChatMessage(role = "a", text = toolText)
+                        messages.add(toolMessage)
+                        fullHistory.add(toolMessage)
                     }
 
                     is ChatStreamEvent.Done -> {
@@ -114,5 +152,9 @@ class ChatViewModel @Inject constructor(
         if (value.length < 180) return false
         if (!(value.startsWith("{") && value.endsWith("}"))) return false
         return value.contains("\"type\"") || value.contains("\"kind\"") || value.contains("\"event\"")
+    }
+
+    private companion object {
+        const val PAGE_SIZE = 20
     }
 }

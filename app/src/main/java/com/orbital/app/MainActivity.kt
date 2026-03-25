@@ -223,7 +223,10 @@ fun OrbitalNavigation(vm: MainViewModel, appearance: AppearanceSettings) {
                     session = session,
                     messages = chatVm.messages,
                     isStreaming = chatVm.isStreaming,
+                    hasOlderMessages = chatVm.hasOlderMessages,
+                    isLoadingOlder = chatVm.isLoadingOlder,
                     errorMessage = chatVm.errorMessage,
+                    onLoadOlderMessages = chatVm::loadOlderMessages,
                     onSendMessage = chatVm::sendMessage,
                     onBack = { navController.popBackStack() }
                 )

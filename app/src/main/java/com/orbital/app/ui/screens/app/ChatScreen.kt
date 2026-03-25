@@ -23,10 +23,12 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -57,7 +59,10 @@ fun ChatScreen(
     session: Session,
     messages: List<ChatMessage>,
     isStreaming: Boolean,
+    hasOlderMessages: Boolean,
+    isLoadingOlder: Boolean,
     errorMessage: String?,
+    onLoadOlderMessages: () -> Unit,
     onSendMessage: (String) -> Unit,
     onBack: () -> Unit
 ) {
@@ -73,9 +78,28 @@ fun ChatScreen(
     var showSkills by remember { mutableStateOf(false) }
 
     val listState = rememberLazyListState()
+    val isNearBottom by remember {
+        derivedStateOf {
+            val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
+            val lastIndex = messages.lastIndex
+            lastIndex <= 0 || lastVisible >= lastIndex - 2
+        }
+    }
 
     LaunchedEffect(messages.size) {
-        if (messages.isNotEmpty()) listState.animateScrollToItem(messages.lastIndex)
+        if (messages.isNotEmpty() && !isLoadingOlder && isNearBottom) {
+            listState.animateScrollToItem(messages.lastIndex)
+        }
+    }
+
+    LaunchedEffect(listState, hasOlderMessages, isLoadingOlder) {
+        if (!hasOlderMessages) return@LaunchedEffect
+        snapshotFlow { listState.firstVisibleItemIndex to listState.firstVisibleItemScrollOffset }
+            .collect { (index, offset) ->
+                if (!isLoadingOlder && hasOlderMessages && index == 0 && offset <= 8) {
+                    onLoadOlderMessages()
+                }
+            }
     }
 
     fun send() {
@@ -175,6 +199,23 @@ fun ChatScreen(
                     .padding(horizontal = 14.dp, vertical = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
+                if (isLoadingOlder) {
+                    item {
+                        Text(
+                            text = "loading older messages...",
+                            style = typ.labelSmall.copy(color = th.muted, fontSize = 8.sp, fontFamily = mono),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                } else if (hasOlderMessages) {
+                    item {
+                        Text(
+                            text = "scroll up to load more",
+                            style = typ.labelSmall.copy(color = th.muted, fontSize = 8.sp, fontFamily = mono),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                }
                 items(messages) { msg ->
                     val isUser = msg.role == "u"
                     Column(
