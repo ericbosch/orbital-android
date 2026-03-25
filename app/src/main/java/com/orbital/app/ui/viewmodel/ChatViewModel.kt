@@ -1,5 +1,6 @@
 package com.orbital.app.ui.viewmodel
 
+import android.util.Log
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -12,6 +13,8 @@ import com.orbital.app.domain.ChatStreamEvent
 import com.orbital.app.domain.Session
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -19,6 +22,7 @@ import javax.inject.Inject
 class ChatViewModel @Inject constructor(
     private val repository: OrbitalRepository
 ) : ViewModel() {
+    private val logTag = "ChatViewModel"
 
     val messages = mutableStateListOf<ChatMessage>()
     var isStreaming by mutableStateOf(false)
@@ -82,6 +86,7 @@ class ChatViewModel @Inject constructor(
         val userMessage = ChatMessage(role = "u", text = text)
         messages.add(userMessage)
         fullHistory.add(userMessage)
+        Log.d(logTag, "sendMessage session=$sessionId len=${text.length}")
         isStreaming = true
         errorMessage = null
 
@@ -89,52 +94,95 @@ class ChatViewModel @Inject constructor(
         streamJob = viewModelScope.launch {
             var assistantIndex = -1
             var assistantFullIndex = -1
-            repository.sendMessageAndStream(session, text) { event ->
-                when (event) {
-                    is ChatStreamEvent.Output -> {
-                        if (event.text.isLikelyRawJsonBlob()) return@sendMessageAndStream
-                        if (assistantIndex < 0) {
-                            val assistantMessage = ChatMessage(role = "a", text = event.text)
-                            messages.add(assistantMessage)
-                            assistantIndex = messages.lastIndex
-                            fullHistory.add(assistantMessage)
-                            assistantFullIndex = fullHistory.lastIndex
-                        } else {
-                            val prev = messages[assistantIndex]
-                            messages[assistantIndex] = prev.copy(text = prev.text + event.text)
-                            if (assistantFullIndex >= 0) {
-                                val fullPrev = fullHistory[assistantFullIndex]
-                                fullHistory[assistantFullIndex] = fullPrev.copy(text = fullPrev.text + event.text)
+            var lastEventAtMs = System.currentTimeMillis()
+            var receivedAnyStreamEvent = false
+
+            val streamWorker = launch {
+                repository.sendMessageAndStream(session, text) { event ->
+                    when (event) {
+                        is ChatStreamEvent.Output -> {
+                            if (event.text.isBlank()) return@sendMessageAndStream
+                            receivedAnyStreamEvent = true
+                            lastEventAtMs = System.currentTimeMillis()
+                        }
+                        is ChatStreamEvent.ToolUse -> {
+                            receivedAnyStreamEvent = true
+                            lastEventAtMs = System.currentTimeMillis()
+                        }
+                        is ChatStreamEvent.Done, is ChatStreamEvent.Error -> {
+                            lastEventAtMs = System.currentTimeMillis()
+                        }
+                        is ChatStreamEvent.Noop -> Unit
+                    }
+                    when (event) {
+                        is ChatStreamEvent.Output -> {
+                            if (event.text.isLikelyRawJsonBlob()) return@sendMessageAndStream
+                            if (assistantIndex < 0) {
+                                val assistantMessage = ChatMessage(role = "a", text = event.text)
+                                messages.add(assistantMessage)
+                                assistantIndex = messages.lastIndex
+                                fullHistory.add(assistantMessage)
+                                assistantFullIndex = fullHistory.lastIndex
+                            } else {
+                                val prev = messages[assistantIndex]
+                                messages[assistantIndex] = prev.copy(text = prev.text + event.text)
+                                if (assistantFullIndex >= 0) {
+                                    val fullPrev = fullHistory[assistantFullIndex]
+                                    fullHistory[assistantFullIndex] = fullPrev.copy(text = fullPrev.text + event.text)
+                                }
                             }
                         }
-                    }
 
-                    is ChatStreamEvent.ToolUse -> {
-                        val toolText = buildString {
-                            append("[tool] ")
-                            append(event.tool)
-                            if (event.inputSummary.isNotBlank()) {
-                                append(": ")
-                                append(event.inputSummary)
+                        is ChatStreamEvent.ToolUse -> {
+                            val toolText = buildString {
+                                append("[tool] ")
+                                append(event.tool)
+                                if (event.inputSummary.isNotBlank()) {
+                                    append(": ")
+                                    append(event.inputSummary)
+                                }
                             }
+                            val toolMessage = ChatMessage(role = "a", text = toolText)
+                            messages.add(toolMessage)
+                            fullHistory.add(toolMessage)
                         }
-                        val toolMessage = ChatMessage(role = "a", text = toolText)
-                        messages.add(toolMessage)
-                        fullHistory.add(toolMessage)
-                    }
 
-                    is ChatStreamEvent.Done -> {
-                        isStreaming = false
-                    }
+                        is ChatStreamEvent.Done -> {
+                            Log.d(logTag, "stream done session=$sessionId")
+                            isStreaming = false
+                        }
 
-                    is ChatStreamEvent.Error -> {
-                        errorMessage = event.message
-                        isStreaming = false
-                    }
+                        is ChatStreamEvent.Error -> {
+                            Log.e(logTag, "stream error session=$sessionId msg=${event.message}")
+                            errorMessage = event.message
+                            isStreaming = false
+                        }
 
-                    is ChatStreamEvent.Noop -> Unit
+                        is ChatStreamEvent.Noop -> Unit
+                    }
                 }
             }
+
+            while (isActive && streamWorker.isActive) {
+                delay(500)
+                val timeout = if (receivedAnyStreamEvent) STREAM_IDLE_TIMEOUT_MS else STREAM_FIRST_CHUNK_TIMEOUT_MS
+                val elapsed = System.currentTimeMillis() - lastEventAtMs
+                if (elapsed > timeout) {
+                    Log.e(logTag, "stream timeout session=$sessionId elapsed=${elapsed}ms received=$receivedAnyStreamEvent")
+                    errorMessage = if (receivedAnyStreamEvent) {
+                        "Stream interrumpido por inactividad"
+                    } else {
+                        "Timeout esperando respuesta de Orbital"
+                    }
+                    isStreaming = false
+                    streamWorker.cancel()
+                    break
+                }
+            }
+
+            if (streamWorker.isActive) streamWorker.cancel()
+            streamWorker.join()
+
             if (isStreaming) {
                 // fallback in case backend closes stream without explicit done event
                 isStreaming = false
@@ -156,5 +204,7 @@ class ChatViewModel @Inject constructor(
 
     private companion object {
         const val PAGE_SIZE = 20
+        const val STREAM_FIRST_CHUNK_TIMEOUT_MS = 45_000L
+        const val STREAM_IDLE_TIMEOUT_MS = 90_000L
     }
 }

@@ -1,5 +1,6 @@
 package com.orbital.app.core.network
 
+import android.util.Log
 import com.orbital.app.domain.Agent
 import com.orbital.app.domain.AgentStatus
 import com.orbital.app.domain.ChatMessage
@@ -24,6 +25,7 @@ import io.ktor.http.isSuccess
 import io.ktor.websocket.Frame
 import io.ktor.websocket.readText
 import io.ktor.websocket.send
+import kotlinx.coroutines.delay
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -32,6 +34,7 @@ import kotlinx.serialization.json.JsonPrimitive
 import javax.inject.Inject
 
 class OrbitalApiClient @Inject constructor(private val client: HttpClient) {
+    private val logTag = "OrbitalApiClient"
 
     private val json = Json { ignoreUnknownKeys = true }
 
@@ -163,57 +166,100 @@ class OrbitalApiClient @Inject constructor(private val client: HttpClient) {
             }
         }
 
+        var wsError: Exception? = null
+        repeat(2) { attempt ->
+            try {
+                streamViaWebSocket(
+                    wsUrl = wsUrl,
+                    session = session,
+                    content = content,
+                    onEvent = onEvent
+                )
+                return
+            } catch (e: Exception) {
+                wsError = e
+                Log.e(logTag, "ws attempt=${attempt + 1} failed session=${session.id}: ${e.message}")
+                if (attempt == 0) delay(300)
+            }
+        }
+
+        // Fallback to REST send + synthetic completion if WS is not available.
         try {
-            client.webSocket(urlString = wsUrl) {
-                val commandType = when (session.provider.lowercase()) {
-                    "codex" -> "codex-command"
-                    "cursor" -> "cursor-command"
-                    "gemini" -> "gemini-command"
-                    else -> "claude-command"
-                }
-                val payload = JsonObject(
+            client.post("$baseUrl/api/sessions/$sessionId/messages") {
+                authHeader()
+                parameter("provider", session.provider)
+                if (!session.projectName.isNullOrBlank()) parameter("projectName", session.projectName)
+                if (!session.projectPath.isNullOrBlank()) parameter("projectPath", session.projectPath)
+                contentType(ContentType.Application.Json)
+                setBody(
                     mapOf(
-                        "type" to JsonPrimitive(commandType),
-                        "command" to JsonPrimitive(content),
-                        "options" to JsonObject(
-                            buildMap {
-                                put("sessionId", JsonPrimitive(sessionId))
-                                put("resume", JsonPrimitive(false))
-                                if (!session.projectPath.isNullOrBlank()) {
-                                    put("projectPath", JsonPrimitive(session.projectPath))
-                                    put("cwd", JsonPrimitive(session.projectPath))
-                                }
-                            }
-                        )
+                        "content" to content,
+                        "provider" to session.provider,
+                        "sessionId" to sessionId
                     )
                 )
-                send(Frame.Text(json.encodeToString(JsonObject.serializer(), payload)))
+            }
+            Log.d(logTag, "fallback REST send ok session=$sessionId")
+            onEvent(ChatStreamEvent.Done)
+        } catch (fallbackErr: Exception) {
+            Log.e(logTag, "fallback REST failed session=$sessionId: ${fallbackErr.message}")
+            onEvent(ChatStreamEvent.Error(wsError?.message ?: fallbackErr.message ?: "stream failed"))
+        }
+    }
 
-                var pendingLine = ""
-                for (frame in incoming) {
-                    if (frame !is Frame.Text) continue
-                    val payloadText = pendingLine + frame.readText()
-                    val lines = payloadText.split('\n')
-                    pendingLine = lines.lastOrNull().orEmpty()
-                    lines.dropLast(1).forEach { line ->
-                        onEvent(parseStreamEvent(line))
+    private suspend fun streamViaWebSocket(
+        wsUrl: String,
+        session: Session,
+        content: String,
+        onEvent: (ChatStreamEvent) -> Unit
+    ) {
+        Log.d(logTag, "ws connect session=${session.id} provider=${session.provider}")
+        client.webSocket(urlString = wsUrl) {
+            val commandType = when (session.provider.lowercase()) {
+                "codex" -> "codex-command"
+                "cursor" -> "cursor-command"
+                "gemini" -> "gemini-command"
+                else -> "claude-command"
+            }
+            val payload = JsonObject(
+                mapOf(
+                    "type" to JsonPrimitive(commandType),
+                    "command" to JsonPrimitive(content),
+                    "options" to JsonObject(
+                        buildMap {
+                            put("sessionId", JsonPrimitive(session.id))
+                            put("resume", JsonPrimitive(false))
+                            if (!session.projectPath.isNullOrBlank()) {
+                                put("projectPath", JsonPrimitive(session.projectPath))
+                                put("cwd", JsonPrimitive(session.projectPath))
+                            }
+                        }
+                    )
+                )
+            )
+            send(Frame.Text(json.encodeToString(JsonObject.serializer(), payload)))
+            Log.d(logTag, "ws sent command type=$commandType len=${content.length}")
+
+            var pendingLine = ""
+            for (frame in incoming) {
+                if (frame !is Frame.Text) continue
+                val payloadText = pendingLine + frame.readText()
+                val lines = payloadText.split('\n')
+                pendingLine = lines.lastOrNull().orEmpty()
+                lines.dropLast(1).forEach { line ->
+                    val event = parseStreamEvent(line)
+                    if (event !is ChatStreamEvent.Noop) {
+                        Log.d(logTag, "ws event=${event::class.simpleName} lineLen=${line.length}")
                     }
-                }
-                if (pendingLine.isNotBlank()) {
-                    onEvent(parseStreamEvent(pendingLine))
+                    onEvent(event)
                 }
             }
-        } catch (e: Exception) {
-            // Fallback to REST send + synthetic completion if WS is not available.
-            try {
-                client.post("$baseUrl/api/sessions/$sessionId/messages") {
-                    authHeader()
-                    contentType(ContentType.Application.Json)
-                    setBody(mapOf("content" to content))
+            if (pendingLine.isNotBlank()) {
+                val event = parseStreamEvent(pendingLine)
+                if (event !is ChatStreamEvent.Noop) {
+                    Log.d(logTag, "ws tail event=${event::class.simpleName} lineLen=${pendingLine.length}")
                 }
-                onEvent(ChatStreamEvent.Done)
-            } catch (_: Exception) {
-                onEvent(ChatStreamEvent.Error(e.message ?: "stream failed"))
+                onEvent(event)
             }
         }
     }
@@ -297,7 +343,7 @@ class OrbitalApiClient @Inject constructor(private val client: HttpClient) {
         return ""
     }
 
-    private companion object {
+    companion object {
         val IGNORED_STREAM_MARKERS = setOf(
             "token_budget",
             "usage",
