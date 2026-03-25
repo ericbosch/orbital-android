@@ -1,0 +1,10 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!-- Wand + sparkle — Aider (AI coding assistant) -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M17,3L21,7L9,19L5,15ZM3,21L7,20L4,17ZM19,1L20,4L23,5L20,6L19,9L18,6L15,5L18,4ZM11,2L11.8,4.2L14,5L11.8,5.8L11,8L10.2,5.8L8,5L10.2,4.2Z"/>
+</vector>

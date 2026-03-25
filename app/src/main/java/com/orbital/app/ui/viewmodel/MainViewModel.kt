@@ -83,6 +83,7 @@ class MainViewModel @Inject constructor(
                     serverHost = stored.url.removePrefix("http://").substringBefore(":")
                     serverName = name
                     _connectionState.value = ConnectionState.Connected(stored.url, name)
+                    refreshFromServer()
                 }
             }
         }

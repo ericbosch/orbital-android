@@ -1,5 +1,6 @@
 package com.orbital.app.ui.screens.app
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -14,9 +15,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.orbital.app.R
 import com.orbital.app.domain.Agent
 import com.orbital.app.domain.AgentStatus
 import com.orbital.app.ui.components.Dot
@@ -85,6 +89,15 @@ private fun AgentCard(agent: Agent, dotCol: Color, onClick: () -> Unit) {
     val typ  = OrbitalTheme.typography
     val off  = agent.status == AgentStatus.OFFLINE
 
+    val logoRes = when (agent.id.lowercase()) {
+        "claude"  -> R.drawable.ic_agent_claude
+        "codex"   -> R.drawable.ic_agent_codex
+        "gemini"  -> R.drawable.ic_agent_gemini
+        "aider"   -> R.drawable.ic_agent_aider
+        "cursor"  -> R.drawable.ic_agent_cursor
+        else      -> null
+    }
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -100,7 +113,16 @@ private fun AgentCard(agent: Agent, dotCol: Color, onClick: () -> Unit) {
             verticalAlignment = Alignment.CenterVertically
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(text = agent.icon, fontSize = 22.sp, color = dotCol)
+                if (logoRes != null) {
+                    Image(
+                        painter = painterResource(id = logoRes),
+                        contentDescription = agent.name,
+                        modifier = Modifier.size(28.dp),
+                        colorFilter = ColorFilter.tint(dotCol)
+                    )
+                } else {
+                    Text(text = agent.icon, fontSize = 22.sp, color = dotCol)
+                }
                 Spacer(Modifier.width(10.dp))
                 Column {
                     Text(
