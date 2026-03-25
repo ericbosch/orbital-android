@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <!-- Allow cleartext HTTP to local/VPN networks (orbital server uses HTTP) -->
+    <domain-config cleartextTrafficPermitted="true">
+        <!-- Tailscale local API -->
+        <domain includeSubdomains="false">100.100.100.100</domain>
+        <!-- Tailscale peer IPs (100.64.0.0/10) -->
+        <domain includeSubdomains="false">100.64.0.0</domain>
+    </domain-config>
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

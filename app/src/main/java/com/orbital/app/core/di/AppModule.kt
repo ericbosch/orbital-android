@@ -53,6 +53,8 @@ object AppModule {
 
     @Provides
     @Singleton
-    fun provideOrbitalRepository(apiClient: OrbitalApiClient): OrbitalRepository =
-        OrbitalRepository(apiClient)
+    fun provideOrbitalRepository(
+        apiClient: OrbitalApiClient,
+        dataStore: DataStore<Preferences>
+    ): OrbitalRepository = OrbitalRepository(apiClient, dataStore)
 }

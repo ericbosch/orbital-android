@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.runtime.collectAsState
@@ -18,6 +19,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import com.orbital.app.core.network.DiscoveredServer
 import com.orbital.app.domain.AppearanceSettings
 import com.orbital.app.ui.components.BottomNav
 import com.orbital.app.ui.screens.app.AgentDetailScreen
@@ -33,6 +35,7 @@ import com.orbital.app.ui.screens.onboarding.ReadyScreen
 import com.orbital.app.ui.screens.onboarding.ScanScreen
 import com.orbital.app.ui.screens.onboarding.Splash
 import com.orbital.app.ui.theme.OrbitalTheme
+import com.orbital.app.ui.viewmodel.ConnectionState
 import com.orbital.app.ui.viewmodel.MainViewModel
 import dagger.hilt.android.AndroidEntryPoint
 
@@ -98,10 +101,34 @@ fun OrbitalNavigation(vm: MainViewModel, appearance: AppearanceSettings) {
         ) {
             // ── Onboarding ──────────────────────────────────────────
             composable("splash") {
-                Splash(onNext = { navController.navigate("scan") })
+                val connectionState by vm.connectionState.collectAsState()
+                Splash(onNext = {
+                    if (connectionState is ConnectionState.Connected) {
+                        navController.navigate("home") {
+                            popUpTo("splash") { inclusive = true }
+                        }
+                    } else {
+                        navController.navigate("scan")
+                    }
+                })
             }
             composable("scan") {
-                ScanScreen(onNext = { navController.navigate("detect") })
+                val discoveredServers by vm.discoveredServers.collectAsState()
+                val connectionState   by vm.connectionState.collectAsState()
+                LaunchedEffect(connectionState) {
+                    if (connectionState is ConnectionState.Connected) {
+                        navController.navigate("detect") {
+                            popUpTo("scan") { inclusive = true }
+                        }
+                    }
+                }
+                ScanScreen(
+                    discoveredServers = discoveredServers,
+                    connectionState   = connectionState,
+                    onStartScan       = vm::startScan,
+                    onConnect         = { server, token -> vm.connect(server, token) },
+                    onManual          = { host, port, token -> vm.connectManual(host, port, token) }
+                )
             }
             composable("detect") {
                 DetectAgents(onNext = { navController.navigate("ready") })

@@ -11,7 +11,7 @@ import kotlinx.coroutines.flow.callbackFlow
 import javax.inject.Inject
 import javax.inject.Singleton
 
-data class DiscoveredServer(val name: String, val host: String, val port: Int)
+data class DiscoveredServer(val name: String, val host: String, val port: Int, val via: String = "LAN")
 
 @Singleton
 class NsdDiscoveryService @Inject constructor(
@@ -20,28 +20,37 @@ class NsdDiscoveryService @Inject constructor(
     private val nsdManager = context.getSystemService(Context.NSD_SERVICE) as NsdManager
     private val TAG = "NsdDiscovery"
 
-    fun discoverServers(): Flow<DiscoveredServer> = callbackFlow {
+    fun discoverServers(): Flow<List<DiscoveredServer>> = callbackFlow {
+        val discovered = mutableMapOf<String, DiscoveredServer>()
+
         val discoveryListener = object : NsdManager.DiscoveryListener {
             override fun onStartDiscoveryFailed(serviceType: String, errorCode: Int) {
                 Log.e(TAG, "Discovery start failed: $errorCode")
             }
             override fun onStopDiscoveryFailed(serviceType: String, errorCode: Int) {}
-            override fun onDiscoveryStarted(serviceType: String) {}
+            override fun onDiscoveryStarted(serviceType: String) {
+                Log.d(TAG, "Discovery started: $serviceType")
+            }
             override fun onDiscoveryStopped(serviceType: String) {}
-            override fun onServiceLost(serviceInfo: NsdServiceInfo) {}
+
+            override fun onServiceLost(serviceInfo: NsdServiceInfo) {
+                discovered.remove(serviceInfo.serviceName)
+                trySend(discovered.values.toList())
+            }
+
             override fun onServiceFound(serviceInfo: NsdServiceInfo) {
                 nsdManager.resolveService(serviceInfo, object : NsdManager.ResolveListener {
                     override fun onResolveFailed(si: NsdServiceInfo, errorCode: Int) {
                         Log.e(TAG, "Resolve failed: $errorCode")
                     }
                     override fun onServiceResolved(si: NsdServiceInfo) {
-                        trySend(
-                            DiscoveredServer(
-                                name = si.serviceName,
-                                host = si.host?.hostAddress ?: "",
-                                port = si.port
-                            )
+                        val server = DiscoveredServer(
+                            name = si.serviceName,
+                            host = si.host?.hostAddress ?: return,
+                            port = si.port
                         )
+                        discovered[server.name] = server
+                        trySend(discovered.values.toList())
                     }
                 })
             }

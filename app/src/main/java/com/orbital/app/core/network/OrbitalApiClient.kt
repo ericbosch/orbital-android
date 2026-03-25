@@ -7,6 +7,9 @@ import com.orbital.app.domain.Skill
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
 import io.ktor.client.request.get
+import io.ktor.client.request.header
+import io.ktor.http.HttpHeaders
+import io.ktor.http.isSuccess
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import javax.inject.Inject
@@ -40,20 +43,36 @@ data class SkillDto(
 
 class OrbitalApiClient @Inject constructor(private val client: HttpClient) {
 
-    private var baseUrl: String = "http://192.168.1.1:8420"
+    private var baseUrl: String = ""
+    private var authToken: String = ""
 
     fun setBaseUrl(url: String) { baseUrl = url }
+    fun setAuthToken(token: String) { authToken = token }
+    fun getBaseUrl(): String = baseUrl
+
+    suspend fun ping(url: String, token: String): Boolean = try {
+        val response = client.get("$url/api/projects") {
+            if (token.isNotBlank()) header(HttpHeaders.Authorization, "Bearer $token")
+        }
+        response.status.isSuccess()
+    } catch (_: Exception) { false }
 
     suspend fun getAgents(): List<Agent> = try {
-        client.get("$baseUrl/api/agents").body<List<AgentDto>>().map { it.toDomain() }
+        client.get("$baseUrl/api/agents") {
+            if (authToken.isNotBlank()) header(HttpHeaders.Authorization, "Bearer $authToken")
+        }.body<List<AgentDto>>().map { it.toDomain() }
     } catch (_: Exception) { emptyList() }
 
     suspend fun getSessions(): List<Session> = try {
-        client.get("$baseUrl/api/sessions").body<List<SessionDto>>().map { it.toDomain() }
+        client.get("$baseUrl/api/sessions") {
+            if (authToken.isNotBlank()) header(HttpHeaders.Authorization, "Bearer $authToken")
+        }.body<List<SessionDto>>().map { it.toDomain() }
     } catch (_: Exception) { emptyList() }
 
     suspend fun getSkills(): List<Skill> = try {
-        client.get("$baseUrl/api/skills").body<List<SkillDto>>().map { it.toDomain() }
+        client.get("$baseUrl/api/skills") {
+            if (authToken.isNotBlank()) header(HttpHeaders.Authorization, "Bearer $authToken")
+        }.body<List<SkillDto>>().map { it.toDomain() }
     } catch (_: Exception) { emptyList() }
 
     private fun AgentDto.toDomain() = Agent(

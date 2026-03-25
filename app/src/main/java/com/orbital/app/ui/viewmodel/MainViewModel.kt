@@ -6,6 +6,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.orbital.app.core.network.DiscoveredServer
+import com.orbital.app.core.network.NsdDiscoveryService
+import com.orbital.app.core.network.TailscaleDiscoveryService
 import com.orbital.app.data.AppearanceStore
 import com.orbital.app.data.OrbitalRepository
 import com.orbital.app.domain.Agent
@@ -14,39 +17,174 @@ import com.orbital.app.domain.AppearanceSettings
 import com.orbital.app.domain.Session
 import com.orbital.app.domain.Skill
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
+sealed class ConnectionState {
+    object Idle : ConnectionState()
+    object Scanning : ConnectionState()
+    data class Connecting(val server: DiscoveredServer) : ConnectionState()
+    data class Connected(val url: String, val name: String) : ConnectionState()
+    data class Error(val message: String) : ConnectionState()
+}
+
 @HiltViewModel
 class MainViewModel @Inject constructor(
     private val repository: OrbitalRepository,
-    private val appearanceStore: AppearanceStore
+    private val appearanceStore: AppearanceStore,
+    private val nsdDiscovery: NsdDiscoveryService,
+    private val tailscaleDiscovery: TailscaleDiscoveryService
 ) : ViewModel() {
 
-    // ─── Appearance (persisted) ───────────────────────────────────
+    // ─── Appearance ───────────────────────────────────────────────
     val appearance = appearanceStore.appearance.stateIn(
         scope = viewModelScope,
         started = SharingStarted.Eagerly,
         initialValue = AppearanceSettings()
     )
 
-    // ─── Live lists ───────────────────────────────────────────────
+    // ─── Connection state ─────────────────────────────────────────
+    private val _connectionState = MutableStateFlow<ConnectionState>(ConnectionState.Idle)
+    val connectionState: StateFlow<ConnectionState> = _connectionState.asStateFlow()
+
+    private val _discoveredServers = MutableStateFlow<List<DiscoveredServer>>(emptyList())
+    val discoveredServers: StateFlow<List<DiscoveredServer>> = _discoveredServers.asStateFlow()
+
+    // ─── Live data ────────────────────────────────────────────────
     val agents   = mutableStateListOf<Agent>()
     val sessions = mutableStateListOf<Session>()
     val skills   = mutableStateListOf<Skill>()
 
-    // ─── Server info ──────────────────────────────────────────────
-    var serverName by mutableStateOf("elitebook")
-        private set
+    var serverName by mutableStateOf("")
     var serverHost by mutableStateOf("")
-        private set
     var latencyMs  by mutableStateOf(0)
-        private set
 
-    init { loadMockData() }
+    private var scanJob: Job? = null
 
+    init {
+        loadMockData()
+        checkStoredServer()
+    }
+
+    private fun checkStoredServer() {
+        viewModelScope.launch {
+            repository.getStoredServer().collect { stored ->
+                if (stored != null && _connectionState.value is ConnectionState.Idle) {
+                    repository.setServerUrl(stored.url)
+                    repository.setAuthToken(stored.token)
+                    val name = stored.url.removePrefix("http://").substringBefore(":")
+                    serverHost = stored.url.removePrefix("http://").substringBefore(":")
+                    serverName = name
+                    _connectionState.value = ConnectionState.Connected(stored.url, name)
+                }
+            }
+        }
+    }
+
+    // ─── Scan ─────────────────────────────────────────────────────
+    fun startScan() {
+        _connectionState.value = ConnectionState.Scanning
+        _discoveredServers.value = emptyList()
+        scanJob?.cancel()
+        scanJob = viewModelScope.launch {
+            // NSD (LAN, continuous flow)
+            launch {
+                nsdDiscovery.discoverServers().collect { lan ->
+                    _discoveredServers.value =
+                        _discoveredServers.value.filter { it.via != "LAN" } + lan
+                }
+            }
+            // Tailscale (one-shot: resolve saved server name via MagicDNS)
+            launch {
+                val savedName = repository.getStoredServerName().firstOrNull() ?: ""
+                val ts = tailscaleDiscovery.discoverServers(
+                    savedHostnames = listOfNotNull(savedName.ifBlank { null })
+                )
+                if (ts.isNotEmpty()) {
+                    _discoveredServers.value =
+                        _discoveredServers.value.filter { it.via != "Tailscale" } + ts
+                }
+            }
+        }
+    }
+
+    fun stopScan() {
+        scanJob?.cancel()
+        if (_connectionState.value is ConnectionState.Scanning) {
+            _connectionState.value = ConnectionState.Idle
+        }
+    }
+
+    // ─── Connect ──────────────────────────────────────────────────
+    fun connect(server: DiscoveredServer, token: String) {
+        viewModelScope.launch {
+            stopScan()
+            _connectionState.value = ConnectionState.Connecting(server)
+            val url = "http://${server.host}:${server.port}"
+            val ok  = repository.ping(url, token)
+            if (ok) {
+                repository.saveServer(url, token, server.name)
+                repository.setServerUrl(url)
+                repository.setAuthToken(token)
+                serverName = server.name
+                serverHost = server.host
+                _connectionState.value = ConnectionState.Connected(url, server.name)
+                refreshFromServer()
+            } else {
+                _connectionState.value = ConnectionState.Error("No se pudo conectar a ${server.name}")
+            }
+        }
+    }
+
+    fun connectManual(host: String, port: Int, token: String) {
+        val server = DiscoveredServer(name = host, host = host, port = port, via = "Manual")
+        connect(server, token)
+    }
+
+    fun disconnect() {
+        viewModelScope.launch {
+            repository.clearServer()
+            serverName = ""
+            serverHost = ""
+            _connectionState.value = ConnectionState.Idle
+        }
+    }
+
+    fun clearError() {
+        _connectionState.value = ConnectionState.Idle
+    }
+
+    // ─── Data refresh ─────────────────────────────────────────────
+    private fun refreshFromServer() {
+        viewModelScope.launch {
+            val remoteAgents   = repository.getAgents()
+            val remoteSessions = repository.getSessions()
+            val remoteSkills   = repository.getSkills()
+            if (remoteAgents.isNotEmpty())   { agents.clear();   agents.addAll(remoteAgents)     }
+            if (remoteSessions.isNotEmpty()) { sessions.clear(); sessions.addAll(remoteSessions) }
+            if (remoteSkills.isNotEmpty())   { skills.clear();   skills.addAll(remoteSkills)     }
+        }
+    }
+
+    // ─── Appearance ───────────────────────────────────────────────
+    fun updateAppearance(settings: AppearanceSettings) {
+        viewModelScope.launch { appearanceStore.save(settings) }
+    }
+
+    fun toggleSkill(index: Int) {
+        if (index in skills.indices) {
+            skills[index] = skills[index].copy(enabled = !skills[index].enabled)
+        }
+    }
+
+    // ─── Mock data (shown until server responds) ──────────────────
     private fun loadMockData() {
         agents.addAll(listOf(
             Agent("claude", "Claude Code", "claude-opus-4-6",   AgentStatus.ACTIVE,  8, "◎"),
@@ -68,34 +206,5 @@ class MainViewModel @Inject constructor(
             Skill("Test Generator",      "testing",   false),
             Skill("Doc Writer",          "docs",      false),
         ))
-    }
-
-    fun setServer(name: String, host: String, latency: Int) {
-        serverName = name
-        serverHost = host
-        latencyMs  = latency
-        repository.setServerUrl("http://$host:8420")
-        refreshFromServer()
-    }
-
-    private fun refreshFromServer() {
-        viewModelScope.launch {
-            val remoteAgents   = repository.getAgents()
-            val remoteSessions = repository.getSessions()
-            val remoteSkills   = repository.getSkills()
-            if (remoteAgents.isNotEmpty())   { agents.clear();   agents.addAll(remoteAgents)     }
-            if (remoteSessions.isNotEmpty()) { sessions.clear(); sessions.addAll(remoteSessions) }
-            if (remoteSkills.isNotEmpty())   { skills.clear();   skills.addAll(remoteSkills)     }
-        }
-    }
-
-    fun updateAppearance(settings: AppearanceSettings) {
-        viewModelScope.launch { appearanceStore.save(settings) }
-    }
-
-    fun toggleSkill(index: Int) {
-        if (index in skills.indices) {
-            skills[index] = skills[index].copy(enabled = !skills[index].enabled)
-        }
     }
 }
