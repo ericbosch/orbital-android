@@ -14,7 +14,9 @@ import com.orbital.app.data.OrbitalRepository
 import com.orbital.app.domain.Agent
 import com.orbital.app.domain.AgentStatus
 import com.orbital.app.domain.AppearanceSettings
+import com.orbital.app.domain.DiagnosticCheck
 import com.orbital.app.domain.Project
+import com.orbital.app.domain.SearchResult
 import com.orbital.app.domain.Session
 import com.orbital.app.domain.Skill
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -61,10 +63,15 @@ class MainViewModel @Inject constructor(
     val agents = mutableStateListOf<Agent>()
     val sessions = mutableStateListOf<Session>()
     val skills = mutableStateListOf<Skill>()
+    val searchResults = mutableStateListOf<SearchResult>()
+    val diagnostics = mutableStateListOf<DiagnosticCheck>()
 
     var serverName by mutableStateOf("")
     var serverHost by mutableStateOf("")
     var latencyMs by mutableStateOf(0)
+    var authToken by mutableStateOf("")
+    var isSearching by mutableStateOf(false)
+    var diagnosticsRunning by mutableStateOf(false)
 
     private var scanJob: Job? = null
 
@@ -82,6 +89,7 @@ class MainViewModel @Inject constructor(
                     val name = stored.url.removePrefix("http://").substringBefore(":")
                     serverHost = stored.url.removePrefix("http://").substringBefore(":")
                     serverName = name
+                    authToken = stored.token
                     _connectionState.value = ConnectionState.Connected(stored.url, name)
                     refreshFromServer()
                 }
@@ -130,6 +138,7 @@ class MainViewModel @Inject constructor(
                 repository.saveServer(url, token, server.name)
                 repository.setServerUrl(url)
                 repository.setAuthToken(token)
+                authToken = token
                 serverName = server.name
                 serverHost = server.host
                 _connectionState.value = ConnectionState.Connected(url, server.name)
@@ -145,18 +154,39 @@ class MainViewModel @Inject constructor(
         connect(server, token)
     }
 
+    fun updateServerToken(newToken: String) {
+        val connected = _connectionState.value as? ConnectionState.Connected ?: return
+        viewModelScope.launch {
+            val ok = repository.ping(connected.url, newToken)
+            if (ok) {
+                repository.saveServer(connected.url, newToken, connected.name)
+                repository.setAuthToken(newToken)
+                authToken = newToken
+                clearError()
+                refreshFromServer()
+            } else {
+                _connectionState.value = ConnectionState.Error("Token inválido o expirado")
+            }
+        }
+    }
+
     fun disconnect() {
         viewModelScope.launch {
             repository.clearServer()
             serverName = ""
             serverHost = ""
+            authToken = ""
             projects.clear()
+            searchResults.clear()
+            diagnostics.clear()
             _connectionState.value = ConnectionState.Idle
         }
     }
 
     fun clearError() {
-        _connectionState.value = ConnectionState.Idle
+        if (_connectionState.value is ConnectionState.Error) {
+            _connectionState.value = ConnectionState.Idle
+        }
     }
 
     fun refreshFromServer() {
@@ -193,6 +223,45 @@ class MainViewModel @Inject constructor(
                 skills.clear()
                 skills.addAll(remoteSkills)
             }
+        }
+    }
+
+    fun runDiagnostics() {
+        val connected = _connectionState.value as? ConnectionState.Connected ?: return
+        viewModelScope.launch {
+            diagnosticsRunning = true
+            diagnostics.clear()
+
+            val pingOk = repository.ping(connected.url, authToken)
+            diagnostics.add(DiagnosticCheck("Pinging host", pingOk, connected.url))
+
+            val projectsOk = repository.getProjects().isNotEmpty()
+            diagnostics.add(DiagnosticCheck("Projects endpoint", projectsOk, "/api/projects"))
+
+            val agentsOk = repository.getAgents().isNotEmpty()
+            diagnostics.add(DiagnosticCheck("Agents endpoint", agentsOk, "/api/agents"))
+
+            val sessionsOk = repository.getSessions().isNotEmpty()
+            diagnostics.add(DiagnosticCheck("Sessions endpoint", sessionsOk, "/api/sessions"))
+
+            val skillsOk = repository.getSkills().isNotEmpty()
+            diagnostics.add(DiagnosticCheck("Skills endpoint", skillsOk, "/api/skills"))
+
+            diagnosticsRunning = false
+        }
+    }
+
+    fun search(query: String) {
+        if (query.isBlank()) {
+            searchResults.clear()
+            return
+        }
+        viewModelScope.launch {
+            isSearching = true
+            val results = repository.search(query)
+            searchResults.clear()
+            searchResults.addAll(results)
+            isSearching = false
         }
     }
 

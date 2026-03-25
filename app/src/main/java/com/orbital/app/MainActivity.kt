@@ -179,13 +179,24 @@ fun OrbitalNavigation(vm: MainViewModel, appearance: AppearanceSettings) {
                 )
             }
             composable("explore") {
-                ExploreScreen(skills = vm.skills)
+                ExploreScreen(
+                    skills = vm.skills,
+                    searchResults = vm.searchResults,
+                    isSearching = vm.isSearching,
+                    onSearch = vm::search
+                )
             }
             composable("settings") {
+                val connectionState by vm.connectionState.collectAsState()
                 SettingsScreen(
                     serverHost         = vm.serverHost,
+                    authToken          = vm.authToken,
+                    connectionError    = (connectionState as? ConnectionState.Error)?.message,
                     appearance         = appearance,
                     onAppearanceChange = vm::updateAppearance,
+                    onSaveToken        = vm::updateServerToken,
+                    onRefreshData      = vm::refreshFromServer,
+                    onDisconnect       = vm::disconnect,
                     onTroubleshoot     = { navController.navigate("troubleshoot") }
                 )
             }
@@ -219,6 +230,9 @@ fun OrbitalNavigation(vm: MainViewModel, appearance: AppearanceSettings) {
             composable("troubleshoot") {
                 TroubleshootScreen(
                     serverName = vm.serverName,
+                    checks = vm.diagnostics,
+                    isRunning = vm.diagnosticsRunning,
+                    onRun = vm::runDiagnostics,
                     onBack     = { navController.popBackStack() }
                 )
             }

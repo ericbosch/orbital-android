@@ -5,6 +5,7 @@ import com.orbital.app.domain.AgentStatus
 import com.orbital.app.domain.ChatMessage
 import com.orbital.app.domain.ChatStreamEvent
 import com.orbital.app.domain.Project
+import com.orbital.app.domain.SearchResult
 import com.orbital.app.domain.Session
 import com.orbital.app.domain.Skill
 import io.ktor.client.HttpClient
@@ -92,6 +93,17 @@ class OrbitalApiClient @Inject constructor(private val client: HttpClient) {
     suspend fun getSkills(): List<Skill> = try {
         parseArrayBody(client.get("$baseUrl/api/skills") { authHeader() }.body())
             .mapNotNull { it.toSkill() }
+    } catch (_: Exception) {
+        emptyList()
+    }
+
+    suspend fun search(query: String): List<SearchResult> = try {
+        parseArrayBody(
+            client.get("$baseUrl/api/search") {
+                authHeader()
+                parameter("q", query)
+            }.body()
+        ).mapNotNull { it.toSearchResult() }
     } catch (_: Exception) {
         emptyList()
     }
@@ -244,6 +256,14 @@ class OrbitalApiClient @Inject constructor(private val client: HttpClient) {
         val tag = string("tag") ?: "general"
         val enabled = bool("on") ?: bool("enabled") ?: false
         return Skill(name = name, tag = tag, enabled = enabled)
+    }
+
+    private fun JsonObject.toSearchResult(): SearchResult? {
+        val id = string("id") ?: string("sessionId") ?: string("projectName") ?: return null
+        val type = string("type") ?: if (string("projectName") != null) "project" else "session"
+        val title = string("title") ?: string("name") ?: id
+        val subtitle = string("subtitle") ?: string("path") ?: string("agent") ?: ""
+        return SearchResult(id = id, type = type, title = title, subtitle = subtitle)
     }
 
     private fun JsonObject.string(key: String): String? =

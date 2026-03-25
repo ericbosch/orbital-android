@@ -9,6 +9,7 @@ import com.orbital.app.domain.Agent
 import com.orbital.app.domain.ChatMessage
 import com.orbital.app.domain.ChatStreamEvent
 import com.orbital.app.domain.Project
+import com.orbital.app.domain.SearchResult
 import com.orbital.app.domain.Session
 import com.orbital.app.domain.Skill
 import kotlinx.coroutines.flow.Flow
@@ -69,5 +70,6 @@ class OrbitalRepository @Inject constructor(
         content: String,
         onEvent: (ChatStreamEvent) -> Unit
     ) = apiClient.sendMessageAndStream(sessionId, content, onEvent)
+    suspend fun search(query: String): List<SearchResult> = apiClient.search(query)
     suspend fun getSkills(): List<Skill> = apiClient.getSkills()
 }
