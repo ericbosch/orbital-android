@@ -76,6 +76,7 @@ fun ChatScreen(
     var activeMode by remember { mutableStateOf("code") }
     var showModel by remember { mutableStateOf(false) }
     var showSkills by remember { mutableStateOf(false) }
+    var initialAutoScrollDone by remember(session.id) { mutableStateOf(false) }
 
     val listState = rememberLazyListState()
     val isNearBottom by remember {
@@ -87,7 +88,10 @@ fun ChatScreen(
     }
 
     LaunchedEffect(messages.size) {
-        if (messages.isNotEmpty() && !isLoadingOlder && isNearBottom) {
+        if (messages.isNotEmpty() && !initialAutoScrollDone) {
+            listState.scrollToItem(messages.lastIndex)
+            initialAutoScrollDone = true
+        } else if (messages.isNotEmpty() && !isLoadingOlder && isNearBottom) {
             listState.animateScrollToItem(messages.lastIndex)
         }
     }
