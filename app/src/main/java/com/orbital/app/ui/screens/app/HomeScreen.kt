@@ -1,5 +1,6 @@
 package com.orbital.app.ui.screens.app
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -13,12 +14,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.orbital.app.domain.Agent
 import com.orbital.app.domain.AgentStatus
 import com.orbital.app.domain.Session
+import com.orbital.app.ui.components.agentLogoRes
 import com.orbital.app.ui.components.Dot
 import com.orbital.app.ui.components.Mark
 import com.orbital.app.ui.theme.OrbitalTheme
@@ -181,6 +185,9 @@ private fun AgentRow(agent: Agent, col: Color, onClick: () -> Unit) {
     val mono = OrbitalTheme.fonts.mono
     val ui   = OrbitalTheme.fonts.ui
     val typ  = OrbitalTheme.typography
+
+    val logoRes = agentLogoRes(agent.id)
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -193,7 +200,16 @@ private fun AgentRow(agent: Agent, col: Color, onClick: () -> Unit) {
         verticalAlignment = Alignment.CenterVertically
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Dot(col = col, ping = agent.status == AgentStatus.ACTIVE)
+            if (logoRes != null) {
+                Image(
+                    painter = painterResource(id = logoRes),
+                    contentDescription = agent.name,
+                    modifier = Modifier.size(24.dp),
+                    colorFilter = ColorFilter.tint(col)
+                )
+            } else {
+                Dot(col = col, ping = agent.status == AgentStatus.ACTIVE)
+            }
             Spacer(Modifier.width(8.dp))
             Column {
                 Text(
