@@ -1,0 +1,20 @@
+# Gradle
+.gradle/
+build/
+**/build/
+*.apk
+*.aab
+
+# Local config
+local.properties
+*.local.properties
+
+# IDE
+.idea/
+*.iml
+.DS_Store
+
+# Misc
+code_index.db
+mcp_server.log
+*.log

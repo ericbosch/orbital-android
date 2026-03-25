@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Orbital icon — matches the portfolio SVG (shared.jsx Mark component)
+    Source viewBox: 64×64. Scaled ×1.125 into 72×72 safe zone, offset +18 into 108×108 canvas.
+
+    Elements:
+      - Ellipse orbital ring: cx=54,cy=54, rx=23.625, ry=10.6875, rotated -18°
+      - Center planet: r=6.1875 at (54,54)
+      - Large satellite: r=3.15 at (75.94,48.9)
+      - Small satellite: r=2.3625 at (33.75,60.19), alpha=0.7
+      - Tiny dot: r=1.9125 at (56.25,39.94), alpha=0.45
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Glow: orbital ring (wide transparent stroke) -->
+    <group
+        android:rotation="-18"
+        android:pivotX="54"
+        android:pivotY="54">
+        <path
+            android:fillColor="@android:color/transparent"
+            android:strokeColor="#7C3AED"
+            android:strokeWidth="6"
+            android:strokeAlpha="0.14"
+            android:pathData="M30.375,54 a23.625,10.6875 0 1,0 47.25,0 a23.625,10.6875 0 1,0 -47.25,0" />
+        <!-- Orbital ring -->
+        <path
+            android:fillColor="@android:color/transparent"
+            android:strokeColor="#7C3AED"
+            android:strokeWidth="1.8"
+            android:strokeAlpha="0.9"
+            android:pathData="M30.375,54 a23.625,10.6875 0 1,0 47.25,0 a23.625,10.6875 0 1,0 -47.25,0" />
+    </group>
+
+    <!-- Glow: center planet (outer) -->
+    <path
+        android:fillColor="#7C3AED"
+        android:fillAlpha="0.1"
+        android:pathData="M54,54 m-14,0 a14,14 0 1,0 28,0 a14,14 0 1,0 -28,0" />
+    <!-- Glow: center planet (inner) -->
+    <path
+        android:fillColor="#7C3AED"
+        android:fillAlpha="0.2"
+        android:pathData="M54,54 m-10,0 a10,10 0 1,0 20,0 a10,10 0 1,0 -20,0" />
+
+    <!-- Center planet -->
+    <path
+        android:fillColor="#7C3AED"
+        android:pathData="M54,54 m-6.1875,0 a6.1875,6.1875 0 1,0 12.375,0 a6.1875,6.1875 0 1,0 -12.375,0" />
+
+    <!-- Large satellite (top-right) -->
+    <path
+        android:fillColor="#7C3AED"
+        android:pathData="M75.94,48.9 m-3.15,0 a3.15,3.15 0 1,0 6.3,0 a3.15,3.15 0 1,0 -6.3,0" />
+
+    <!-- Small satellite (bottom-left) -->
+    <path
+        android:fillColor="#7C3AED"
+        android:fillAlpha="0.7"
+        android:pathData="M33.75,60.19 m-2.3625,0 a2.3625,2.3625 0 1,0 4.725,0 a2.3625,2.3625 0 1,0 -4.725,0" />
+
+    <!-- Tiny dot (upper-center) -->
+    <path
+        android:fillColor="#7C3AED"
+        android:fillAlpha="0.45"
+        android:pathData="M56.25,39.94 m-1.9125,0 a1.9125,1.9125 0 1,0 3.825,0 a1.9125,1.9125 0 1,0 -3.825,0" />
+
+</vector>
