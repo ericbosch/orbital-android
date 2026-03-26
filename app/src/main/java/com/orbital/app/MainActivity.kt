@@ -199,6 +199,7 @@ fun OrbitalNavigation(vm: MainViewModel, appearance: AppearanceSettings) {
                 val connectionState by vm.connectionState.collectAsState()
                 SettingsScreen(
                     serverHost         = vm.serverHost,
+                    backendProfileLabel = vm.backendProfile.label(),
                     authToken          = vm.authToken,
                     connectionError    = (connectionState as? ConnectionState.Error)?.message,
                     appearance         = appearance,

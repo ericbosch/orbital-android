@@ -3,6 +3,7 @@ package com.orbital.app.core.network
 import android.util.Log
 import com.orbital.app.domain.Agent
 import com.orbital.app.domain.AgentStatus
+import com.orbital.app.domain.BackendProfile
 import com.orbital.app.domain.ChatMessage
 import com.orbital.app.domain.ChatStreamEvent
 import com.orbital.app.domain.Project
@@ -59,6 +60,28 @@ class OrbitalApiClient @Inject constructor(private val client: HttpClient) {
                 }.status.isSuccess()
             } catch (_: Exception) {
                 false
+            }
+        }
+    }
+
+    suspend fun detectBackendProfile(url: String, token: String): BackendProfile {
+        val normalized = url.trimEnd('/')
+        return try {
+            val body = client.get("$normalized/api/server/meta") {
+                if (token.isNotBlank()) header(HttpHeaders.Authorization, "Bearer $token")
+            }.bodyAsText().lowercase()
+            if (body.contains("orbitdock")) BackendProfile.ORBITDOCK else BackendProfile.UNKNOWN
+        } catch (_: Exception) {
+            try {
+                val body = client.get("$normalized/api/health") {
+                    if (token.isNotBlank()) header(HttpHeaders.Authorization, "Bearer $token")
+                }.bodyAsText().lowercase()
+                when {
+                    body.contains("orbitdock") -> BackendProfile.ORBITDOCK
+                    else -> BackendProfile.ORBITAL
+                }
+            } catch (_: Exception) {
+                BackendProfile.UNKNOWN
             }
         }
     }

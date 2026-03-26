@@ -14,6 +14,7 @@ import com.orbital.app.data.OrbitalRepository
 import com.orbital.app.domain.Agent
 import com.orbital.app.domain.AgentStatus
 import com.orbital.app.domain.AppearanceSettings
+import com.orbital.app.domain.BackendProfile
 import com.orbital.app.domain.DiagnosticCheck
 import com.orbital.app.domain.Project
 import com.orbital.app.domain.SearchResult
@@ -68,6 +69,7 @@ class MainViewModel @Inject constructor(
 
     var serverName by mutableStateOf("")
     var serverHost by mutableStateOf("")
+    var backendProfile by mutableStateOf(BackendProfile.UNKNOWN)
     var latencyMs by mutableStateOf(0)
     var authToken by mutableStateOf("")
     var isSearching by mutableStateOf(false)
@@ -92,6 +94,7 @@ class MainViewModel @Inject constructor(
                     val name = stored.name.ifBlank { host }
                     serverHost = stored.url.removePrefix("http://").substringBefore(":")
                     serverName = name
+                    backendProfile = stored.backendProfile
                     authToken = stored.token
                     restoredConnection = true
                     _connectionState.value = ConnectionState.Connected(stored.url, name)
@@ -139,12 +142,14 @@ class MainViewModel @Inject constructor(
             }.toInt()
 
             if (ok) {
-                repository.saveServer(url, token, server.name)
+                val detectedProfile = repository.detectBackendProfile(url, token)
+                repository.saveServer(url, token, server.name, detectedProfile)
                 repository.setServerUrl(url)
                 repository.setAuthToken(token)
                 authToken = token
                 serverName = server.name
                 serverHost = server.host
+                backendProfile = detectedProfile
                 restoredConnection = false
                 _connectionState.value = ConnectionState.Connected(url, server.name)
                 refreshFromServer()
@@ -164,9 +169,11 @@ class MainViewModel @Inject constructor(
         viewModelScope.launch {
             val ok = repository.ping(connected.url, newToken)
             if (ok) {
-                repository.saveServer(connected.url, newToken, connected.name)
+                val detectedProfile = repository.detectBackendProfile(connected.url, newToken)
+                repository.saveServer(connected.url, newToken, connected.name, detectedProfile)
                 repository.setAuthToken(newToken)
                 authToken = newToken
+                backendProfile = detectedProfile
                 clearError()
                 refreshFromServer()
             } else {
@@ -180,6 +187,7 @@ class MainViewModel @Inject constructor(
             repository.clearServer()
             serverName = ""
             serverHost = ""
+            backendProfile = BackendProfile.UNKNOWN
             authToken = ""
             restoredConnection = false
             projects.clear()

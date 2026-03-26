@@ -39,6 +39,7 @@ private val FONTS = listOf("Syne / JetBrains", "DM Sans / Fira", "Space / IBM Pl
 @Composable
 fun SettingsScreen(
     serverHost: String,
+    backendProfileLabel: String,
     authToken: String,
     connectionError: String?,
     appearance: AppearanceSettings,
@@ -231,6 +232,8 @@ fun SettingsScreen(
         SectionHeader("CONNECTION")
         SettingsCard {
             InfoRow("Host", serverHost.ifEmpty { "—" })
+            Box(Modifier.fillMaxWidth().height(1.dp).background(th.border))
+            InfoRow("Backend", backendProfileLabel)
             Box(Modifier.fillMaxWidth().height(1.dp).background(th.border))
             InfoRow("Via", "LAN (primary)")
             Box(Modifier.fillMaxWidth().height(1.dp).background(th.border))

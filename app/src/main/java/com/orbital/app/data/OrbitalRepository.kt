@@ -6,6 +6,7 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import com.orbital.app.core.network.OrbitalApiClient
 import com.orbital.app.domain.Agent
+import com.orbital.app.domain.BackendProfile
 import com.orbital.app.domain.ChatMessage
 import com.orbital.app.domain.ChatStreamEvent
 import com.orbital.app.domain.Project
@@ -17,7 +18,12 @@ import kotlinx.coroutines.flow.map
 import javax.inject.Inject
 import javax.inject.Singleton
 
-data class StoredServer(val url: String, val token: String, val name: String)
+data class StoredServer(
+    val url: String,
+    val token: String,
+    val name: String,
+    val backendProfile: BackendProfile = BackendProfile.UNKNOWN
+)
 
 @Singleton
 class OrbitalRepository @Inject constructor(
@@ -28,24 +34,32 @@ class OrbitalRepository @Inject constructor(
         private val SERVER_URL  = stringPreferencesKey("server_url")
         private val AUTH_TOKEN  = stringPreferencesKey("auth_token")
         private val SERVER_NAME = stringPreferencesKey("server_name")
+        private val BACKEND_PROFILE = stringPreferencesKey("backend_profile")
     }
 
     fun getStoredServer(): Flow<StoredServer?> = dataStore.data.map { prefs ->
         val url = prefs[SERVER_URL] ?: return@map null
         val token = prefs[AUTH_TOKEN] ?: return@map null
         val name = prefs[SERVER_NAME] ?: ""
-        if (url.isNotBlank()) StoredServer(url, token, name) else null
+        val profile = BackendProfile.fromStored(prefs[BACKEND_PROFILE])
+        if (url.isNotBlank()) StoredServer(url, token, name, profile) else null
     }
 
     fun getStoredServerName(): Flow<String> = dataStore.data.map { prefs ->
         prefs[SERVER_NAME] ?: ""
     }
 
-    suspend fun saveServer(url: String, token: String, name: String) {
+    suspend fun saveServer(
+        url: String,
+        token: String,
+        name: String,
+        backendProfile: BackendProfile = BackendProfile.UNKNOWN
+    ) {
         dataStore.edit { prefs ->
             prefs[SERVER_URL] = url
             prefs[AUTH_TOKEN] = token
             prefs[SERVER_NAME] = name
+            prefs[BACKEND_PROFILE] = backendProfile.name.lowercase()
         }
     }
 
@@ -54,10 +68,13 @@ class OrbitalRepository @Inject constructor(
             prefs.remove(SERVER_URL)
             prefs.remove(AUTH_TOKEN)
             prefs.remove(SERVER_NAME)
+            prefs.remove(BACKEND_PROFILE)
         }
     }
 
     suspend fun ping(url: String, token: String): Boolean = apiClient.ping(url, token)
+    suspend fun detectBackendProfile(url: String, token: String): BackendProfile =
+        apiClient.detectBackendProfile(url, token)
 
     fun setServerUrl(url: String) = apiClient.setBaseUrl(url)
     fun setAuthToken(token: String) = apiClient.setAuthToken(token)
