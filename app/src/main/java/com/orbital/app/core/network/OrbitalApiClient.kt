@@ -352,6 +352,28 @@ class OrbitalApiClient @Inject constructor(private val client: HttpClient) {
                     tool = obj.string("tool") ?: obj.string("name") ?: "tool",
                     inputSummary = obj.string("toolInput") ?: obj.string("input") ?: ""
                 )
+                "permission_request" -> {
+                    val tool = obj.string("toolName") ?: obj.string("tool") ?: "tool"
+                    val inputSummary = obj["input"]?.compactJsonSummary().orEmpty()
+                    val prompt = buildString {
+                        append("Aprobación requerida para ")
+                        append(tool)
+                        if (inputSummary.isNotBlank()) {
+                            append(": ")
+                            append(inputSummary)
+                        }
+                    }
+                    ChatStreamEvent.ActionRequired(prompt)
+                }
+                "interactive_prompt" -> {
+                    val content = obj.string("content") ?: obj.string("text") ?: "El agente requiere una respuesta."
+                    ChatStreamEvent.ActionRequired(content)
+                }
+                "permission_cancelled" -> ChatStreamEvent.Status("Solicitud de aprobación cancelada")
+                "status" -> {
+                    val text = obj.string("text") ?: obj.string("message") ?: ""
+                    if (text.isBlank() || text.lowercase() in IGNORED_STREAM_MARKERS) ChatStreamEvent.Noop else ChatStreamEvent.Status(text)
+                }
                 "done", "complete", "stream_end" -> ChatStreamEvent.Done
                 "error" -> ChatStreamEvent.Error(obj.string("message") ?: obj.string("content") ?: "unknown error")
                 else -> {
@@ -430,6 +452,15 @@ class OrbitalApiClient @Inject constructor(private val client: HttpClient) {
 
     private fun io.ktor.client.request.HttpRequestBuilder.authHeader() {
         if (authToken.isNotBlank()) header(HttpHeaders.Authorization, "Bearer $authToken")
+    }
+
+    private fun JsonElement.compactJsonSummary(maxLen: Int = 120): String {
+        val raw = when (this) {
+            is JsonPrimitive -> content
+            else -> toString()
+        }.replace("\\s+".toRegex(), " ").trim()
+        if (raw.length <= maxLen) return raw
+        return raw.take(maxLen - 1) + "…"
     }
 
     private fun parseArrayBody(body: JsonElement): List<JsonObject> = when (body) {

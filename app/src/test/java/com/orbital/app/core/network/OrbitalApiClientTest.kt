@@ -153,6 +153,20 @@ class OrbitalApiClientTest {
         assertEquals(ChatStreamEvent.Noop, event)
     }
 
+    @Test
+    fun `stream parser maps permission request to action required`() {
+        val api = clientFor(emptyMap())
+        val event = api.parseStreamEvent("""{"kind":"permission_request","toolName":"Bash","input":{"command":"git push"}}""")
+        assertTrue(event is ChatStreamEvent.ActionRequired)
+    }
+
+    @Test
+    fun `stream parser maps interactive prompt to action required`() {
+        val api = clientFor(emptyMap())
+        val event = api.parseStreamEvent("""{"kind":"interactive_prompt","content":"Approve this action?"}""")
+        assertEquals(ChatStreamEvent.ActionRequired("Approve this action?"), event)
+    }
+
     private fun clientFor(pathToBody: Map<String, String>): OrbitalApiClient {
         val engine = MockEngine { request ->
             val path = request.url.encodedPath

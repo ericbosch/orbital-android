@@ -114,6 +114,10 @@ class ChatViewModel @Inject constructor(
                         is ChatStreamEvent.Status -> {
                             lastEventAtMs = System.currentTimeMillis()
                         }
+                        is ChatStreamEvent.ActionRequired -> {
+                            receivedAnyStreamEvent = true
+                            lastEventAtMs = System.currentTimeMillis()
+                        }
                         is ChatStreamEvent.Done, is ChatStreamEvent.Error -> {
                             lastEventAtMs = System.currentTimeMillis()
                         }
@@ -154,6 +158,13 @@ class ChatViewModel @Inject constructor(
 
                         is ChatStreamEvent.Status -> {
                             streamStatusMessage = event.message
+                        }
+
+                        is ChatStreamEvent.ActionRequired -> {
+                            streamStatusMessage = "Acción requerida"
+                            val actionMessage = ChatMessage(role = "a", text = "[action required] ${event.message}")
+                            messages.add(actionMessage)
+                            fullHistory.add(actionMessage)
                         }
 
                         is ChatStreamEvent.Done -> {
