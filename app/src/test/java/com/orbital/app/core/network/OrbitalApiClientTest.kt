@@ -8,6 +8,7 @@ import io.ktor.http.ContentType
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
 import io.ktor.serialization.kotlinx.json.json
+import com.orbital.app.domain.BackendProfile
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
@@ -59,6 +60,27 @@ class OrbitalApiClientTest {
     }
 
     @Test
+    fun `parses orbitdock sessions when backend profile is orbitdock`() = runBlocking {
+        val payload = """
+            {
+              "sessions": [
+                {"id":"od-1","provider":"codex","project_path":"/workspace/repo-a","status":"active"}
+              ]
+            }
+        """.trimIndent()
+
+        val api = clientFor(pathToBody = mapOf("/api/sessions" to payload))
+        api.setBaseUrl("http://localhost:8080")
+        api.setBackendProfile(BackendProfile.ORBITDOCK)
+
+        val sessions = api.getSessions()
+        assertEquals(1, sessions.size)
+        assertEquals("od-1", sessions[0].id)
+        assertEquals("/workspace/repo-a", sessions[0].projectPath)
+        assertEquals("repo-a", sessions[0].projectName)
+    }
+
+    @Test
     fun `parses agents with status mapping`() = runBlocking {
         val payload = """
             {
@@ -96,6 +118,28 @@ class OrbitalApiClientTest {
         assertEquals(2, messages.size)
         assertEquals("u", messages[0].role)
         assertEquals("a", messages[1].role)
+    }
+
+    @Test
+    fun `parses orbitdock message rows payload`() = runBlocking {
+        val payload = """
+            {
+              "rows": [
+                {"row":{"row_type":"assistant","id":"m1","content":"hola"}},
+                {"row":{"row_type":"tool","id":"t1","title":"Bash","summary":"ls -la"}}
+              ]
+            }
+        """.trimIndent()
+
+        val api = clientFor(pathToBody = mapOf("/api/sessions/s1/messages" to payload))
+        api.setBaseUrl("http://localhost:8080")
+        api.setBackendProfile(BackendProfile.ORBITDOCK)
+
+        val messages = api.getSessionMessages("s1", "codex", null, null)
+        assertEquals(2, messages.size)
+        assertEquals("a", messages[0].role)
+        assertEquals("hola", messages[0].text)
+        assertEquals("[tool] Bash: ls -la", messages[1].text)
     }
 
     @Test

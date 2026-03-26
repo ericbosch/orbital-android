@@ -63,13 +63,15 @@ Define a stable Android-facing contract that works with:
 - Backend profile persisted and shown in Settings.
 - Stream reliability improved (retry/status/friendly errors).
 - Action-required stream events surfaced in chat.
+- Minimal OrbitDock runtime adapter wired:
+  - sessions list normalization
+  - messages history normalization
+  - send-message + response polling flow
 
 ## Next implementation tasks
 
 - Add `SessionGateway` interface and two implementations (Orbital/OrbitDock).
 - Move current `OrbitalApiClient` behavior under Orbital adapter.
-- Implement minimal OrbitDock adapter:
-  - health
-  - sessions list
-  - messages history
-  - websocket send/stream baseline
+- Upgrade OrbitDock adapter from polling to WS surfaces:
+  - `subscribe_session_surface` for conversation updates
+  - live approval/question handling

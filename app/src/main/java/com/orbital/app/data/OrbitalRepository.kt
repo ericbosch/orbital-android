@@ -78,6 +78,8 @@ class OrbitalRepository @Inject constructor(
 
     fun setServerUrl(url: String) = apiClient.setBaseUrl(url)
     fun setAuthToken(token: String) = apiClient.setAuthToken(token)
+    fun setBackendProfile(profile: BackendProfile) = apiClient.setBackendProfile(profile)
+    fun getBackendProfile(): BackendProfile = apiClient.getBackendProfile()
 
     suspend fun getProjects(): List<Project> = apiClient.getProjects()
     suspend fun getAgents(): List<Agent> = apiClient.getAgents()

@@ -90,6 +90,7 @@ class MainViewModel @Inject constructor(
                 if (stored != null && _connectionState.value is ConnectionState.Idle) {
                     repository.setServerUrl(stored.url)
                     repository.setAuthToken(stored.token)
+                    repository.setBackendProfile(stored.backendProfile)
                     val host = stored.url.removePrefix("http://").substringBefore(":")
                     val name = stored.name.ifBlank { host }
                     serverHost = stored.url.removePrefix("http://").substringBefore(":")
@@ -146,6 +147,7 @@ class MainViewModel @Inject constructor(
                 repository.saveServer(url, token, server.name, detectedProfile)
                 repository.setServerUrl(url)
                 repository.setAuthToken(token)
+                repository.setBackendProfile(detectedProfile)
                 authToken = token
                 serverName = server.name
                 serverHost = server.host
@@ -172,6 +174,7 @@ class MainViewModel @Inject constructor(
                 val detectedProfile = repository.detectBackendProfile(connected.url, newToken)
                 repository.saveServer(connected.url, newToken, connected.name, detectedProfile)
                 repository.setAuthToken(newToken)
+                repository.setBackendProfile(detectedProfile)
                 authToken = newToken
                 backendProfile = detectedProfile
                 clearError()
@@ -217,7 +220,9 @@ class MainViewModel @Inject constructor(
                 agents.addAll(remoteAgents)
             }
 
-            val loadedSessions = if (remoteProjects.isNotEmpty()) {
+            val loadedSessions = if (backendProfile == BackendProfile.ORBITDOCK) {
+                repository.getSessions()
+            } else if (remoteProjects.isNotEmpty()) {
                 remoteProjects.flatMap { project ->
                     val claude = repository.getSessions(project.name).map { session ->
                         session.copy(

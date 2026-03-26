@@ -42,9 +42,12 @@ class OrbitalApiClient @Inject constructor(private val client: HttpClient) {
 
     private var baseUrl: String = ""
     private var authToken: String = ""
+    private var backendProfile: BackendProfile = BackendProfile.UNKNOWN
 
     fun setBaseUrl(url: String) { baseUrl = url.trimEnd('/') }
     fun setAuthToken(token: String) { authToken = token }
+    fun setBackendProfile(profile: BackendProfile) { backendProfile = profile }
+    fun getBackendProfile(): BackendProfile = backendProfile
     fun getBaseUrl(): String = baseUrl
 
     suspend fun ping(url: String, token: String): Boolean {
@@ -86,11 +89,17 @@ class OrbitalApiClient @Inject constructor(private val client: HttpClient) {
         }
     }
 
-    suspend fun getProjects(): List<Project> = try {
-        parseArrayBody(client.get("$baseUrl/api/projects") { authHeader() }.body())
-            .mapNotNull { it.toProject() }
-    } catch (_: Exception) {
-        emptyList()
+    suspend fun getProjects(): List<Project> {
+        return try {
+            if (backendProfile == BackendProfile.ORBITDOCK) {
+                orbitDockProjectsFromSessions()
+            } else {
+                parseArrayBody(client.get("$baseUrl/api/projects") { authHeader() }.body())
+                    .mapNotNull { it.toProject() }
+            }
+        } catch (_: Exception) {
+            emptyList()
+        }
     }
 
     suspend fun getAgents(): List<Agent> = try {
@@ -100,39 +109,58 @@ class OrbitalApiClient @Inject constructor(private val client: HttpClient) {
         emptyList()
     }
 
-    suspend fun getSessions(projectName: String? = null): List<Session> = try {
-        val url = if (projectName.isNullOrBlank()) {
-            "$baseUrl/api/sessions"
-        } else {
-            "$baseUrl/api/projects/$projectName/sessions"
+    suspend fun getSessions(projectName: String? = null): List<Session> {
+        return try {
+            if (backendProfile == BackendProfile.ORBITDOCK) {
+                val all = fetchOrbitDockSessions()
+                if (projectName.isNullOrBlank()) all else all.filter { it.projectName == projectName }
+            } else {
+                val url = if (projectName.isNullOrBlank()) {
+                    "$baseUrl/api/sessions"
+                } else {
+                    "$baseUrl/api/projects/$projectName/sessions"
+                }
+                parseArrayBody(
+                    client.get(url) { authHeader() }.body()
+                ).mapNotNull { it.toSession(defaultProjectName = projectName, defaultProvider = "claude") }
+            }
+        } catch (_: Exception) {
+            emptyList()
         }
-        parseArrayBody(
-            client.get(url) { authHeader() }.body()
-        ).mapNotNull { it.toSession(defaultProjectName = projectName, defaultProvider = "claude") }
-    } catch (_: Exception) {
-        emptyList()
     }
 
-    suspend fun getCodexSessions(projectPath: String): List<Session> = try {
-        parseArrayBody(
-            client.get("$baseUrl/api/codex/sessions") {
-                authHeader()
-                parameter("projectPath", projectPath)
-            }.body()
-        ).mapNotNull { it.toSession(defaultProvider = "codex", defaultProjectPath = projectPath) }
-    } catch (_: Exception) {
-        emptyList()
+    suspend fun getCodexSessions(projectPath: String): List<Session> {
+        return try {
+            if (backendProfile == BackendProfile.ORBITDOCK) {
+                fetchOrbitDockSessions().filter { it.provider.equals("codex", ignoreCase = true) }
+            } else {
+                parseArrayBody(
+                    client.get("$baseUrl/api/codex/sessions") {
+                        authHeader()
+                        parameter("projectPath", projectPath)
+                    }.body()
+                ).mapNotNull { it.toSession(defaultProvider = "codex", defaultProjectPath = projectPath) }
+            }
+        } catch (_: Exception) {
+            emptyList()
+        }
     }
 
-    suspend fun getCursorSessions(projectPath: String): List<Session> = try {
-        parseArrayBody(
-            client.get("$baseUrl/api/cursor/sessions") {
-                authHeader()
-                parameter("projectPath", projectPath)
-            }.body()
-        ).mapNotNull { it.toSession(defaultProvider = "cursor", defaultProjectPath = projectPath) }
-    } catch (_: Exception) {
-        emptyList()
+    suspend fun getCursorSessions(projectPath: String): List<Session> {
+        return try {
+            if (backendProfile == BackendProfile.ORBITDOCK) {
+                fetchOrbitDockSessions().filter { it.provider.equals("cursor", ignoreCase = true) }
+            } else {
+                parseArrayBody(
+                    client.get("$baseUrl/api/cursor/sessions") {
+                        authHeader()
+                        parameter("projectPath", projectPath)
+                    }.body()
+                ).mapNotNull { it.toSession(defaultProvider = "cursor", defaultProjectPath = projectPath) }
+            }
+        } catch (_: Exception) {
+            emptyList()
+        }
     }
 
     suspend fun getSessionMessages(
@@ -140,16 +168,22 @@ class OrbitalApiClient @Inject constructor(private val client: HttpClient) {
         provider: String,
         projectName: String?,
         projectPath: String?
-    ): List<ChatMessage> = try {
-        parseArrayBody(client.get("$baseUrl/api/sessions/$sessionId/messages") {
-            authHeader()
-            parameter("provider", provider)
-            if (!projectName.isNullOrBlank()) parameter("projectName", projectName)
-            if (!projectPath.isNullOrBlank()) parameter("projectPath", projectPath)
-        }.body())
-            .mapNotNull { it.toChatMessage() }
-    } catch (_: Exception) {
-        emptyList()
+    ): List<ChatMessage> {
+        return try {
+            if (backendProfile == BackendProfile.ORBITDOCK) {
+                fetchOrbitDockRows(sessionId).mapNotNull { it.toOrbitDockChatMessage() }
+            } else {
+                parseArrayBody(client.get("$baseUrl/api/sessions/$sessionId/messages") {
+                    authHeader()
+                    parameter("provider", provider)
+                    if (!projectName.isNullOrBlank()) parameter("projectName", projectName)
+                    if (!projectPath.isNullOrBlank()) parameter("projectPath", projectPath)
+                }.body())
+                    .mapNotNull { it.toChatMessage() }
+            }
+        } catch (_: Exception) {
+            emptyList()
+        }
     }
 
     suspend fun getSkills(): List<Skill> = try {
@@ -175,6 +209,10 @@ class OrbitalApiClient @Inject constructor(private val client: HttpClient) {
         content: String,
         onEvent: (ChatStreamEvent) -> Unit
     ) {
+        if (backendProfile == BackendProfile.ORBITDOCK) {
+            sendMessageAndStreamOrbitDock(session, content, onEvent)
+            return
+        }
         val sessionId = session.id
         val wsBase = baseUrl
             .replaceFirst("https://", "wss://")
@@ -340,6 +378,73 @@ class OrbitalApiClient @Inject constructor(private val client: HttpClient) {
         }
     }
 
+    private suspend fun sendMessageAndStreamOrbitDock(
+        session: Session,
+        content: String,
+        onEvent: (ChatStreamEvent) -> Unit
+    ) {
+        val sessionId = session.id
+        val seenRowIds = fetchOrbitDockRows(sessionId).mapNotNull { it.string("id") }.toMutableSet()
+
+        onEvent(ChatStreamEvent.Status("Enviando mensaje..."))
+        client.post("$baseUrl/api/sessions/$sessionId/messages") {
+            authHeader()
+            contentType(ContentType.Application.Json)
+            setBody(mapOf("content" to content))
+        }
+
+        onEvent(ChatStreamEvent.Status("Esperando respuesta de OrbitDock..."))
+        var gotAssistantOutput = false
+        var quietPolls = 0
+        var elapsedMs = 0L
+
+        while (elapsedMs < ORBITDOCK_POLL_TIMEOUT_MS) {
+            delay(ORBITDOCK_POLL_INTERVAL_MS)
+            elapsedMs += ORBITDOCK_POLL_INTERVAL_MS
+
+            val rows = fetchOrbitDockRows(sessionId)
+            val newRows = rows.filter { row ->
+                val id = row.string("id") ?: return@filter false
+                seenRowIds.add(id)
+            }
+
+            if (newRows.isEmpty()) {
+                quietPolls++
+                if (gotAssistantOutput && quietPolls >= ORBITDOCK_QUIET_POLLS_FOR_DONE) {
+                    onEvent(ChatStreamEvent.Done)
+                    return
+                }
+                continue
+            }
+
+            quietPolls = 0
+            newRows.forEach { row ->
+                when (val event = row.toOrbitDockStreamEvent()) {
+                    is ChatStreamEvent.Output -> {
+                        gotAssistantOutput = true
+                        onEvent(event)
+                    }
+                    is ChatStreamEvent.ActionRequired -> {
+                        onEvent(event)
+                        onEvent(ChatStreamEvent.Done)
+                        return
+                    }
+                    is ChatStreamEvent.ToolUse,
+                    is ChatStreamEvent.Status,
+                    is ChatStreamEvent.Error,
+                    is ChatStreamEvent.Done -> onEvent(event)
+                    is ChatStreamEvent.Noop -> Unit
+                }
+            }
+        }
+
+        if (gotAssistantOutput) {
+            onEvent(ChatStreamEvent.Done)
+        } else {
+            onEvent(ChatStreamEvent.Error("Timeout esperando respuesta de OrbitDock"))
+        }
+    }
+
     internal fun parseStreamEvent(line: String): ChatStreamEvent {
         val trimmed = line.trim()
         if (trimmed.isBlank()) return ChatStreamEvent.Noop
@@ -452,6 +557,9 @@ class OrbitalApiClient @Inject constructor(private val client: HttpClient) {
     companion object {
         private const val MAX_WS_ATTEMPTS = 3
         private const val BASE_RETRY_DELAY_MS = 400L
+        private const val ORBITDOCK_POLL_INTERVAL_MS = 1000L
+        private const val ORBITDOCK_POLL_TIMEOUT_MS = 120_000L
+        private const val ORBITDOCK_QUIET_POLLS_FOR_DONE = 3
         val IGNORED_STREAM_MARKERS = setOf(
             "token_budget",
             "usage",
@@ -539,7 +647,8 @@ class OrbitalApiClient @Inject constructor(private val client: HttpClient) {
             ?: parseDateMillis(string("lastActivity"))
         val ago = string("ago") ?: updatedAt?.let(::formatAgo) ?: "now"
         val projectName = string("projectName") ?: string("project") ?: defaultProjectName
-        val projectPath = string("cwd") ?: string("projectPath") ?: defaultProjectPath
+        val projectPath = string("cwd") ?: string("projectPath") ?: string("project_path") ?: defaultProjectPath
+        val projectNameFromPath = projectPath?.substringAfterLast('/')?.takeIf { it.isNotBlank() }
         return Session(
             id = id,
             agent = agent,
@@ -547,7 +656,7 @@ class OrbitalApiClient @Inject constructor(private val client: HttpClient) {
             msgs = msgs,
             ago = ago,
             status = status,
-            projectName = projectName,
+            projectName = projectName ?: projectNameFromPath,
             projectPath = projectPath,
             provider = provider,
             updatedAtMs = updatedAt
@@ -571,6 +680,88 @@ class OrbitalApiClient @Inject constructor(private val client: HttpClient) {
         val tag = string("tag") ?: "general"
         val enabled = bool("on") ?: bool("enabled") ?: false
         return Skill(name = name, tag = tag, enabled = enabled)
+    }
+
+    private fun JsonObject.toOrbitDockChatMessage(): ChatMessage? {
+        val rowType = string("row_type")?.lowercase() ?: return null
+        return when (rowType) {
+            "user", "steer" -> ChatMessage(role = "u", text = string("content") ?: return null)
+            "assistant", "thinking", "system" -> ChatMessage(role = "a", text = string("content") ?: return null)
+            "tool" -> {
+                val title = string("title") ?: string("kind") ?: "tool"
+                val summary = string("summary") ?: string("subtitle") ?: ""
+                ChatMessage(role = "a", text = if (summary.isBlank()) "[tool] $title" else "[tool] $title: $summary")
+            }
+            "approval" -> {
+                val title = string("title") ?: "Approval required"
+                ChatMessage(role = "a", text = "[action required] $title")
+            }
+            "question" -> {
+                val title = string("title") ?: "Question"
+                ChatMessage(role = "a", text = "[action required] $title")
+            }
+            "notice", "context", "task" -> {
+                val text = string("summary") ?: string("title") ?: string("content") ?: return null
+                ChatMessage(role = "a", text = text)
+            }
+            else -> null
+        }
+    }
+
+    private fun JsonObject.toOrbitDockStreamEvent(): ChatStreamEvent {
+        val rowType = string("row_type")?.lowercase() ?: return ChatStreamEvent.Noop
+        return when (rowType) {
+            "assistant", "thinking", "system" -> {
+                val text = string("content") ?: return ChatStreamEvent.Noop
+                ChatStreamEvent.Output(text)
+            }
+            "tool" -> {
+                val title = string("title") ?: string("kind") ?: "tool"
+                val summary = string("summary") ?: string("subtitle") ?: ""
+                ChatStreamEvent.ToolUse(title, summary)
+            }
+            "approval" -> ChatStreamEvent.ActionRequired(string("title") ?: "Approval required")
+            "question" -> ChatStreamEvent.ActionRequired(string("title") ?: "Question pending")
+            "notice", "context", "task" -> {
+                val text = string("summary") ?: string("title") ?: string("content") ?: return ChatStreamEvent.Noop
+                ChatStreamEvent.Status(text)
+            }
+            else -> ChatStreamEvent.Noop
+        }
+    }
+
+    private suspend fun fetchOrbitDockSessions(): List<Session> {
+        val body = client.get("$baseUrl/api/sessions") { authHeader() }.body<JsonElement>()
+        return parseArrayBody(body).mapNotNull { it.toSession(defaultProvider = "codex") }
+    }
+
+    private suspend fun orbitDockProjectsFromSessions(): List<Project> {
+        val sessions = fetchOrbitDockSessions()
+        return sessions
+            .groupBy { it.projectPath ?: it.projectName ?: "unknown" }
+            .map { (pathOrName, rows) ->
+                val path = rows.firstOrNull()?.projectPath ?: ""
+                val name = rows.firstOrNull()?.projectName ?: pathOrName.substringAfterLast('/').ifBlank { pathOrName }
+                Project(name = name, path = path, sessionCount = rows.size)
+            }
+            .sortedBy { it.name.lowercase() }
+    }
+
+    private suspend fun fetchOrbitDockRows(sessionId: String, limit: Int = 200): List<JsonObject> {
+        val body = client.get("$baseUrl/api/sessions/$sessionId/messages") {
+            authHeader()
+            parameter("limit", limit)
+        }.body<JsonElement>()
+
+        val rows = (body as? JsonObject)?.get("rows") as? JsonArray ?: return emptyList()
+        return rows
+            .mapNotNull { it as? JsonObject }
+            .mapNotNull { entry ->
+                (entry["row"] as? JsonObject)?.let { row ->
+                    val id = row["id"] as? JsonPrimitive
+                    if (id == null) row else JsonObject(row + mapOf("id" to id))
+                }
+            }
     }
 
     private fun JsonObject.toSearchResult(): SearchResult? {
