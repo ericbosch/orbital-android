@@ -19,6 +19,60 @@ import com.orbital.app.domain.ChatStreamEvent
 class OrbitalApiClientTest {
 
     @Test
+    fun `ping succeeds against orbitdock health endpoint`() = runBlocking {
+        val api = clientForResponses(
+            mapOf(
+                "/api/health" to (HttpStatusCode.NotFound to ""),
+                "/health" to (HttpStatusCode.OK to """{"status":"ok","version":"0.4.0"}""")
+            )
+        )
+
+        val ok = api.ping("http://localhost:4000", "token")
+        assertTrue(ok)
+    }
+
+    @Test
+    fun `detect backend profile recognizes orbitdock via health`() = runBlocking {
+        val api = clientForResponses(
+            mapOf(
+                "/api/server/meta" to (HttpStatusCode.NotFound to ""),
+                "/api/health" to (HttpStatusCode.NotFound to ""),
+                "/health" to (HttpStatusCode.OK to """{"status":"ok","version":"0.4.0"}""")
+            )
+        )
+
+        val profile = api.detectBackendProfile("http://localhost:4000", "token")
+        assertEquals(BackendProfile.ORBITDOCK, profile)
+    }
+
+    @Test
+    fun `detect backend profile falls back to orbitdock when probes fail`() = runBlocking {
+        val api = clientForResponses(
+            mapOf(
+                "/api/server/meta" to (HttpStatusCode.NotFound to ""),
+                "/health" to (HttpStatusCode.NotFound to ""),
+                "/api/health" to (HttpStatusCode.NotFound to ""),
+                "/api/sessions" to (HttpStatusCode.InternalServerError to "")
+            )
+        )
+
+        val profile = api.detectBackendProfile("http://localhost:4000", "token")
+        assertEquals(BackendProfile.ORBITDOCK, profile)
+    }
+
+    @Test
+    fun `detect backend profile recognizes explicit orbital marker`() = runBlocking {
+        val api = clientForResponses(
+            mapOf(
+                "/api/server/meta" to (HttpStatusCode.OK to """{"name":"orbital-server"}""")
+            )
+        )
+
+        val profile = api.detectBackendProfile("http://localhost:4000", "token")
+        assertEquals(BackendProfile.ORBITAL, profile)
+    }
+
+    @Test
     fun `parses projects from wrapped data payload`() = runBlocking {
         val payload = """
             {
@@ -31,6 +85,7 @@ class OrbitalApiClientTest {
 
         val api = clientFor(pathToBody = mapOf("/api/projects" to payload))
         api.setBaseUrl("http://localhost:8080")
+        api.setBackendProfile(BackendProfile.ORBITAL)
 
         val projects = api.getProjects()
         assertEquals(2, projects.size)
@@ -49,6 +104,7 @@ class OrbitalApiClientTest {
 
         val api = clientFor(pathToBody = mapOf("/api/sessions" to payload))
         api.setBaseUrl("http://localhost:8080")
+        api.setBackendProfile(BackendProfile.ORBITAL)
 
         val sessions = api.getSessions()
         assertEquals(2, sessions.size)
@@ -93,11 +149,35 @@ class OrbitalApiClientTest {
 
         val api = clientFor(pathToBody = mapOf("/api/agents" to payload))
         api.setBaseUrl("http://localhost:8080")
+        api.setBackendProfile(BackendProfile.ORBITAL)
 
         val agents = api.getAgents()
         assertEquals(2, agents.size)
         assertEquals("claude", agents[0].id)
         assertEquals("cursor", agents[1].id)
+    }
+
+    @Test
+    fun `builds agents from orbitdock sessions when agents endpoint is absent`() = runBlocking {
+        val payload = """
+            {
+              "sessions": [
+                {"id":"s1","provider":"codex","project_path":"/workspace/a","status":"active"},
+                {"id":"s2","provider":"codex","project_path":"/workspace/b","status":"idle"},
+                {"id":"s3","provider":"claude","project_path":"/workspace/a","status":"idle"}
+              ]
+            }
+        """.trimIndent()
+
+        val api = clientFor(pathToBody = mapOf("/api/sessions" to payload))
+        api.setBaseUrl("http://localhost:8080")
+        api.setBackendProfile(BackendProfile.ORBITDOCK)
+
+        val agents = api.getAgents()
+        assertEquals(2, agents.size)
+        assertEquals("claude", agents[0].id)
+        assertEquals("codex", agents[1].id)
+        assertEquals(2, agents[1].sessions)
     }
 
     @Test
@@ -113,6 +193,7 @@ class OrbitalApiClientTest {
 
         val api = clientFor(pathToBody = mapOf("/api/sessions/s1/messages" to payload))
         api.setBaseUrl("http://localhost:8080")
+        api.setBackendProfile(BackendProfile.ORBITAL)
 
         val messages = api.getSessionMessages("s1", "claude", "orbital-android", "/workspace/orbital-android")
         assertEquals(2, messages.size)
@@ -212,12 +293,17 @@ class OrbitalApiClientTest {
     }
 
     private fun clientFor(pathToBody: Map<String, String>): OrbitalApiClient {
+        val responses = pathToBody.mapValues { HttpStatusCode.OK to it.value }
+        return clientForResponses(responses)
+    }
+
+    private fun clientForResponses(pathToResponse: Map<String, Pair<HttpStatusCode, String>>): OrbitalApiClient {
         val engine = MockEngine { request ->
             val path = request.url.encodedPath
-            val body = pathToBody[path] ?: "[]"
+            val (status, body) = pathToResponse[path] ?: (HttpStatusCode.OK to "[]")
             respond(
                 content = body,
-                status = HttpStatusCode.OK,
+                status = status,
                 headers = headersOf("Content-Type", ContentType.Application.Json.toString())
             )
         }

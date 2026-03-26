@@ -22,7 +22,7 @@ data class StoredServer(
     val url: String,
     val token: String,
     val name: String,
-    val backendProfile: BackendProfile = BackendProfile.UNKNOWN
+    val backendProfile: BackendProfile = BackendProfile.ORBITDOCK
 )
 
 @Singleton
@@ -53,7 +53,7 @@ class OrbitalRepository @Inject constructor(
         url: String,
         token: String,
         name: String,
-        backendProfile: BackendProfile = BackendProfile.UNKNOWN
+        backendProfile: BackendProfile = BackendProfile.ORBITDOCK
     ) {
         dataStore.edit { prefs ->
             prefs[SERVER_URL] = url

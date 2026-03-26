@@ -69,7 +69,7 @@ class MainViewModel @Inject constructor(
 
     var serverName by mutableStateOf("")
     var serverHost by mutableStateOf("")
-    var backendProfile by mutableStateOf(BackendProfile.UNKNOWN)
+    var backendProfile by mutableStateOf(BackendProfile.ORBITDOCK)
     var latencyMs by mutableStateOf(0)
     var authToken by mutableStateOf("")
     var isSearching by mutableStateOf(false)
@@ -190,7 +190,7 @@ class MainViewModel @Inject constructor(
             repository.clearServer()
             serverName = ""
             serverHost = ""
-            backendProfile = BackendProfile.UNKNOWN
+            backendProfile = BackendProfile.ORBITDOCK
             authToken = ""
             restoredConnection = false
             projects.clear()
@@ -220,7 +220,7 @@ class MainViewModel @Inject constructor(
                 agents.addAll(remoteAgents)
             }
 
-            val loadedSessions = if (backendProfile == BackendProfile.ORBITDOCK) {
+            val loadedSessions = if (backendProfile != BackendProfile.ORBITAL) {
                 repository.getSessions()
             } else if (remoteProjects.isNotEmpty()) {
                 remoteProjects.flatMap { project ->
@@ -283,10 +283,19 @@ class MainViewModel @Inject constructor(
             val agentsOk = repository.getAgents().isNotEmpty()
             diagnostics.add(DiagnosticCheck("Agents endpoint", agentsOk, "/api/agents"))
 
-            val sessionsOk = projects
-                .ifEmpty { repository.getProjects() }
-                .any { repository.getSessions(it.name).isNotEmpty() }
-            diagnostics.add(DiagnosticCheck("Sessions endpoint", sessionsOk, "/api/projects/:projectName/sessions"))
+            val sessionsOk = if (backendProfile != BackendProfile.ORBITAL) {
+                repository.getSessions().isNotEmpty()
+            } else {
+                projects
+                    .ifEmpty { repository.getProjects() }
+                    .any { repository.getSessions(it.name).isNotEmpty() }
+            }
+            val sessionsTarget = if (backendProfile != BackendProfile.ORBITAL) {
+                "/api/sessions"
+            } else {
+                "/api/projects/:projectName/sessions"
+            }
+            diagnostics.add(DiagnosticCheck("Sessions endpoint", sessionsOk, sessionsTarget))
 
             val skillsOk = repository.getSkills().isNotEmpty()
             diagnostics.add(DiagnosticCheck("Skills endpoint", skillsOk, "/api/skills"))

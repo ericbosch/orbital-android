@@ -42,7 +42,7 @@ class OrbitalApiClient @Inject constructor(private val client: HttpClient) {
 
     private var baseUrl: String = ""
     private var authToken: String = ""
-    private var backendProfile: BackendProfile = BackendProfile.UNKNOWN
+    private var backendProfile: BackendProfile = BackendProfile.ORBITDOCK
 
     fun setBaseUrl(url: String) { baseUrl = url.trimEnd('/') }
     fun setAuthToken(token: String) { authToken = token }
@@ -52,13 +52,10 @@ class OrbitalApiClient @Inject constructor(private val client: HttpClient) {
 
     suspend fun ping(url: String, token: String): Boolean {
         val normalized = url.trimEnd('/')
-        return try {
-            client.get("$normalized/api/health") {
-                if (token.isNotBlank()) header(HttpHeaders.Authorization, "Bearer $token")
-            }.status.isSuccess()
-        } catch (_: Exception) {
+        val probes = listOf("/api/health", "/health", "/api/projects", "/api/sessions")
+        return probes.any { path ->
             try {
-                client.get("$normalized/api/projects") {
+                client.get("$normalized$path") {
                     if (token.isNotBlank()) header(HttpHeaders.Authorization, "Bearer $token")
                 }.status.isSuccess()
             } catch (_: Exception) {
@@ -70,21 +67,46 @@ class OrbitalApiClient @Inject constructor(private val client: HttpClient) {
     suspend fun detectBackendProfile(url: String, token: String): BackendProfile {
         val normalized = url.trimEnd('/')
         return try {
-            val body = client.get("$normalized/api/server/meta") {
+            val response = client.get("$normalized/api/server/meta") {
                 if (token.isNotBlank()) header(HttpHeaders.Authorization, "Bearer $token")
-            }.bodyAsText().lowercase()
-            if (body.contains("orbitdock")) BackendProfile.ORBITDOCK else BackendProfile.UNKNOWN
+            }
+            if (!response.status.isSuccess()) throw IllegalStateException("meta unavailable")
+            val body = response.bodyAsText().lowercase()
+            when {
+                body.contains("orbitdock") -> BackendProfile.ORBITDOCK
+                body.contains("orbital") -> BackendProfile.ORBITAL
+                else -> BackendProfile.ORBITDOCK
+            }
         } catch (_: Exception) {
             try {
-                val body = client.get("$normalized/api/health") {
+                val response = client.get("$normalized/health") {
                     if (token.isNotBlank()) header(HttpHeaders.Authorization, "Bearer $token")
-                }.bodyAsText().lowercase()
-                when {
-                    body.contains("orbitdock") -> BackendProfile.ORBITDOCK
-                    else -> BackendProfile.ORBITAL
                 }
+                if (!response.status.isSuccess()) throw IllegalStateException("health unavailable")
+                BackendProfile.ORBITDOCK
             } catch (_: Exception) {
-                BackendProfile.UNKNOWN
+                try {
+                    val response = client.get("$normalized/api/health") {
+                        if (token.isNotBlank()) header(HttpHeaders.Authorization, "Bearer $token")
+                    }
+                    if (!response.status.isSuccess()) throw IllegalStateException("api health unavailable")
+                    val body = response.bodyAsText().lowercase()
+                    when {
+                        body.contains("orbitdock") -> BackendProfile.ORBITDOCK
+                        body.contains("orbital") -> BackendProfile.ORBITAL
+                        else -> BackendProfile.ORBITDOCK
+                    }
+                } catch (_: Exception) {
+                    try {
+                        val response = client.get("$normalized/api/sessions") {
+                            if (token.isNotBlank()) header(HttpHeaders.Authorization, "Bearer $token")
+                        }
+                        if (!response.status.isSuccess()) throw IllegalStateException("sessions unavailable")
+                        BackendProfile.ORBITDOCK
+                    } catch (_: Exception) {
+                        BackendProfile.ORBITDOCK
+                    }
+                }
             }
         }
     }
@@ -103,8 +125,12 @@ class OrbitalApiClient @Inject constructor(private val client: HttpClient) {
     }
 
     suspend fun getAgents(): List<Agent> = try {
-        parseArrayBody(client.get("$baseUrl/api/agents") { authHeader() }.body())
-            .mapNotNull { it.toAgent() }
+        if (backendProfile == BackendProfile.ORBITDOCK) {
+            orbitDockAgentsFromSessions()
+        } else {
+            parseArrayBody(client.get("$baseUrl/api/agents") { authHeader() }.body())
+                .mapNotNull { it.toAgent() }
+        }
     } catch (_: Exception) {
         emptyList()
     }
@@ -743,6 +769,31 @@ class OrbitalApiClient @Inject constructor(private val client: HttpClient) {
                 val path = rows.firstOrNull()?.projectPath ?: ""
                 val name = rows.firstOrNull()?.projectName ?: pathOrName.substringAfterLast('/').ifBlank { pathOrName }
                 Project(name = name, path = path, sessionCount = rows.size)
+            }
+            .sortedBy { it.name.lowercase() }
+    }
+
+    private suspend fun orbitDockAgentsFromSessions(): List<Agent> {
+        val sessions = fetchOrbitDockSessions()
+        if (sessions.isEmpty()) return emptyList()
+        return sessions
+            .groupBy { it.provider.lowercase() }
+            .map { (provider, rows) ->
+                val active = rows.any { it.status.lowercase() == "active" }
+                Agent(
+                    id = provider,
+                    name = providerLabel(provider),
+                    model = "unknown",
+                    status = if (active) AgentStatus.ACTIVE else AgentStatus.IDLE,
+                    sessions = rows.size,
+                    icon = when (provider) {
+                        "codex" -> "◈"
+                        "claude" -> "◎"
+                        "cursor" -> "◉"
+                        "gemini" -> "✦"
+                        else -> "•"
+                    }
+                )
             }
             .sortedBy { it.name.lowercase() }
     }

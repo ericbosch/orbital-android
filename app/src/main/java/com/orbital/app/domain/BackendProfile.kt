@@ -15,7 +15,8 @@ enum class BackendProfile {
         fun fromStored(value: String?): BackendProfile = when (value?.trim()?.lowercase()) {
             "orbital" -> ORBITAL
             "orbitdock" -> ORBITDOCK
-            else -> UNKNOWN
+            // OrbitDock is the primary backend contract for Orbital.
+            else -> ORBITDOCK
         }
     }
 }
