@@ -167,6 +167,7 @@ class OrbitalApiClient @Inject constructor(private val client: HttpClient) {
             }
         }
 
+        onEvent(ChatStreamEvent.Status("Comprobando estado de sesión..."))
         val isBusy = checkSessionBusy(wsUrl, session)
         if (isBusy) {
             val msg = "La sesión está activa en otro cliente. Abre una sesión nueva en Orbital para enviar mensajes."
@@ -176,8 +177,9 @@ class OrbitalApiClient @Inject constructor(private val client: HttpClient) {
         }
 
         var wsError: Exception? = null
-        repeat(2) { attempt ->
+        repeat(MAX_WS_ATTEMPTS) { attempt ->
             try {
+                onEvent(ChatStreamEvent.Status(if (attempt == 0) "Conectando..." else "Reconectando... intento ${attempt + 1}/$MAX_WS_ATTEMPTS"))
                 streamViaWebSocket(
                     wsUrl = wsUrl,
                     session = session,
@@ -188,12 +190,17 @@ class OrbitalApiClient @Inject constructor(private val client: HttpClient) {
             } catch (e: Exception) {
                 wsError = e
                 Log.e(logTag, "ws attempt=${attempt + 1} failed session=${session.id}: ${e.message}")
-                if (attempt == 0) delay(300)
+                if (attempt < MAX_WS_ATTEMPTS - 1) {
+                    val backoff = BASE_RETRY_DELAY_MS * (attempt + 1)
+                    onEvent(ChatStreamEvent.Status("Reintentando conexión en ${backoff}ms..."))
+                    delay(backoff)
+                }
             }
         }
 
         // Fallback to REST send + synthetic completion if WS is not available.
         try {
+            onEvent(ChatStreamEvent.Status("Usando fallback HTTP..."))
             client.post("$baseUrl/api/sessions/$sessionId/messages") {
                 authHeader()
                 parameter("provider", session.provider)
@@ -212,7 +219,7 @@ class OrbitalApiClient @Inject constructor(private val client: HttpClient) {
             onEvent(ChatStreamEvent.Done)
         } catch (fallbackErr: Exception) {
             Log.e(logTag, "fallback REST failed session=$sessionId: ${fallbackErr.message}")
-            onEvent(ChatStreamEvent.Error(wsError?.message ?: fallbackErr.message ?: "stream failed"))
+            onEvent(ChatStreamEvent.Error((wsError?.message ?: fallbackErr.message ?: "stream failed").toFriendlyNetworkError()))
         }
     }
 
@@ -398,6 +405,8 @@ class OrbitalApiClient @Inject constructor(private val client: HttpClient) {
     }
 
     companion object {
+        private const val MAX_WS_ATTEMPTS = 3
+        private const val BASE_RETRY_DELAY_MS = 400L
         val IGNORED_STREAM_MARKERS = setOf(
             "token_budget",
             "usage",
@@ -406,6 +415,17 @@ class OrbitalApiClient @Inject constructor(private val client: HttpClient) {
             "ping",
             "pong"
         )
+    }
+
+    private fun String.toFriendlyNetworkError(): String {
+        val lower = lowercase()
+        return when {
+            "timeout" in lower || "failed to connect" in lower || "connect_timeout" in lower ->
+                "No se pudo conectar con Orbital server. Revisa red/Tailscale y que el backend esté activo."
+            "connection abort" in lower || "socket" in lower ->
+                "La conexión se interrumpió durante el stream. Intenta reenviar el mensaje."
+            else -> this
+        }
     }
 
     private fun io.ktor.client.request.HttpRequestBuilder.authHeader() {

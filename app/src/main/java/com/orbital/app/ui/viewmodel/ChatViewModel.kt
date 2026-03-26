@@ -26,6 +26,7 @@ class ChatViewModel @Inject constructor(
 
     val messages = mutableStateListOf<ChatMessage>()
     var isStreaming by mutableStateOf(false)
+    var streamStatusMessage by mutableStateOf<String?>(null)
     var errorMessage by mutableStateOf<String?>(null)
     var hasOlderMessages by mutableStateOf(false)
         private set
@@ -88,6 +89,7 @@ class ChatViewModel @Inject constructor(
         fullHistory.add(userMessage)
         Log.d(logTag, "sendMessage session=$sessionId len=${text.length}")
         isStreaming = true
+        streamStatusMessage = "Preparando envío..."
         errorMessage = null
 
         streamJob?.cancel()
@@ -107,6 +109,9 @@ class ChatViewModel @Inject constructor(
                         }
                         is ChatStreamEvent.ToolUse -> {
                             receivedAnyStreamEvent = true
+                            lastEventAtMs = System.currentTimeMillis()
+                        }
+                        is ChatStreamEvent.Status -> {
                             lastEventAtMs = System.currentTimeMillis()
                         }
                         is ChatStreamEvent.Done, is ChatStreamEvent.Error -> {
@@ -147,15 +152,21 @@ class ChatViewModel @Inject constructor(
                             fullHistory.add(toolMessage)
                         }
 
+                        is ChatStreamEvent.Status -> {
+                            streamStatusMessage = event.message
+                        }
+
                         is ChatStreamEvent.Done -> {
                             Log.d(logTag, "stream done session=$sessionId")
                             isStreaming = false
+                            streamStatusMessage = null
                         }
 
                         is ChatStreamEvent.Error -> {
                             Log.e(logTag, "stream error session=$sessionId msg=${event.message}")
                             errorMessage = event.message
                             isStreaming = false
+                            streamStatusMessage = null
                         }
 
                         is ChatStreamEvent.Noop -> Unit
@@ -175,6 +186,7 @@ class ChatViewModel @Inject constructor(
                         "Timeout esperando respuesta de Orbital"
                     }
                     isStreaming = false
+                    streamStatusMessage = null
                     streamWorker.cancel()
                     break
                 }
@@ -186,6 +198,7 @@ class ChatViewModel @Inject constructor(
             if (isStreaming) {
                 // fallback in case backend closes stream without explicit done event
                 isStreaming = false
+                streamStatusMessage = null
             }
         }
     }

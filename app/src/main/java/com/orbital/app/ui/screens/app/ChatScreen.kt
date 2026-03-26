@@ -59,6 +59,7 @@ fun ChatScreen(
     session: Session,
     messages: List<ChatMessage>,
     isStreaming: Boolean,
+    streamStatusMessage: String?,
     hasOlderMessages: Boolean,
     isLoadingOlder: Boolean,
     errorMessage: String?,
@@ -269,7 +270,7 @@ fun ChatScreen(
                 if (isStreaming) {
                     item {
                         Text(
-                            text = "streaming...",
+                            text = streamStatusMessage ?: "streaming...",
                             style = typ.labelSmall.copy(color = th.muted, fontSize = 8.sp, fontFamily = mono)
                         )
                     }
