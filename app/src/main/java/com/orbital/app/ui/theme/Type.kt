@@ -26,26 +26,29 @@ val JetBrainsMono = getFontFamily("JetBrains Mono")
 val SpaceGrotesk = getFontFamily("Space Grotesk")
 val DMSans = getFontFamily("DM Sans")
 
-val Typography = Typography(
-    displayLarge = TextStyle(
-        fontFamily = Syne,
-        fontWeight = FontWeight.ExtraBold,
-        fontSize = 34.sp,
-        letterSpacing = (-0.02).sp
-    ),
-    headlineMedium = TextStyle(
-        fontFamily = Syne,
-        fontWeight = FontWeight.Bold,
-        fontSize = 22.sp
-    ),
-    bodyLarge = TextStyle(
-        fontFamily = DMSans,
-        fontWeight = FontWeight.Medium,
-        fontSize = 12.sp
-    ),
-    labelSmall = TextStyle(
-        fontFamily = JetBrainsMono,
-        fontWeight = FontWeight.Normal,
-        fontSize = 9.sp
+fun orbitalTypography(uiFont: FontFamily = Syne, monoFont: FontFamily = JetBrainsMono): Typography =
+    Typography(
+        displayLarge = TextStyle(
+            fontFamily = uiFont,
+            fontWeight = FontWeight.ExtraBold,
+            fontSize = 34.sp,
+            letterSpacing = (-0.02).sp
+        ),
+        headlineMedium = TextStyle(
+            fontFamily = uiFont,
+            fontWeight = FontWeight.Bold,
+            fontSize = 22.sp
+        ),
+        bodyLarge = TextStyle(
+            fontFamily = uiFont,
+            fontWeight = FontWeight.Medium,
+            fontSize = 12.sp
+        ),
+        labelSmall = TextStyle(
+            fontFamily = monoFont,
+            fontWeight = FontWeight.Normal,
+            fontSize = 9.sp
+        )
     )
-)
+
+val Typography = orbitalTypography()

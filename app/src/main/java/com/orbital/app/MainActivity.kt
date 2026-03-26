@@ -35,6 +35,7 @@ import com.orbital.app.ui.screens.onboarding.ReadyScreen
 import com.orbital.app.ui.screens.onboarding.ScanScreen
 import com.orbital.app.ui.screens.onboarding.Splash
 import com.orbital.app.ui.theme.OrbitalTheme
+import com.orbital.app.ui.viewmodel.ChatViewModel
 import com.orbital.app.ui.viewmodel.ConnectionState
 import com.orbital.app.ui.viewmodel.MainViewModel
 import dagger.hilt.android.AndroidEntryPoint
@@ -57,7 +58,8 @@ fun OrbitalRoot() {
     OrbitalTheme(
         themeName  = appearance.themeName,
         accentName = appearance.accentName,
-        fontName   = appearance.fontName
+        fontName   = appearance.fontName,
+        fontSize   = appearance.fontSize
     ) {
         Surface(
             modifier = Modifier.fillMaxSize(),
@@ -102,6 +104,13 @@ fun OrbitalNavigation(vm: MainViewModel, appearance: AppearanceSettings) {
             // ── Onboarding ──────────────────────────────────────────
             composable("splash") {
                 val connectionState by vm.connectionState.collectAsState()
+                LaunchedEffect(connectionState, vm.restoredConnection) {
+                    if (connectionState is ConnectionState.Connected && vm.restoredConnection) {
+                        navController.navigate("home") {
+                            popUpTo("splash") { inclusive = true }
+                        }
+                    }
+                }
                 Splash(onNext = {
                     if (connectionState is ConnectionState.Connected) {
                         navController.navigate("home") {
@@ -117,7 +126,8 @@ fun OrbitalNavigation(vm: MainViewModel, appearance: AppearanceSettings) {
                 val connectionState   by vm.connectionState.collectAsState()
                 LaunchedEffect(connectionState) {
                     if (connectionState is ConnectionState.Connected) {
-                        navController.navigate("detect") {
+                        val target = if (vm.restoredConnection) "home" else "detect"
+                        navController.navigate(target) {
                             popUpTo("scan") { inclusive = true }
                         }
                     }
@@ -178,13 +188,25 @@ fun OrbitalNavigation(vm: MainViewModel, appearance: AppearanceSettings) {
                 )
             }
             composable("explore") {
-                ExploreScreen(skills = vm.skills)
+                ExploreScreen(
+                    skills = vm.skills,
+                    searchResults = vm.searchResults,
+                    isSearching = vm.isSearching,
+                    onSearch = vm::search
+                )
             }
             composable("settings") {
+                val connectionState by vm.connectionState.collectAsState()
                 SettingsScreen(
                     serverHost         = vm.serverHost,
+                    backendProfileLabel = vm.backendProfile.label(),
+                    authToken          = vm.authToken,
+                    connectionError    = (connectionState as? ConnectionState.Error)?.message,
                     appearance         = appearance,
                     onAppearanceChange = vm::updateAppearance,
+                    onSaveToken        = vm::updateServerToken,
+                    onRefreshData      = vm::refreshFromServer,
+                    onDisconnect       = vm::disconnect,
                     onTroubleshoot     = { navController.navigate("troubleshoot") }
                 )
             }
@@ -192,11 +214,24 @@ fun OrbitalNavigation(vm: MainViewModel, appearance: AppearanceSettings) {
             // ── Sub-screens ─────────────────────────────────────────
             composable(
                 route     = "chat/{sessionId}",
-                arguments = listOf(navArgument("sessionId") { type = NavType.IntType })
+                arguments = listOf(navArgument("sessionId") { type = NavType.StringType })
             ) { back ->
-                val id      = back.arguments?.getInt("sessionId") ?: return@composable
-                val session = vm.sessions.find { it.id == id }    ?: return@composable
-                ChatScreen(session = session, onBack = { navController.popBackStack() })
+                val id      = back.arguments?.getString("sessionId") ?: return@composable
+                val session = vm.sessions.find { it.id == id }       ?: return@composable
+                val chatVm: ChatViewModel = hiltViewModel()
+                LaunchedEffect(id) { chatVm.bindSession(session) }
+                ChatScreen(
+                    session = session,
+                    messages = chatVm.messages,
+                    isStreaming = chatVm.isStreaming,
+                    streamStatusMessage = chatVm.streamStatusMessage,
+                    hasOlderMessages = chatVm.hasOlderMessages,
+                    isLoadingOlder = chatVm.isLoadingOlder,
+                    errorMessage = chatVm.errorMessage,
+                    onLoadOlderMessages = chatVm::loadOlderMessages,
+                    onSendMessage = chatVm::sendMessage,
+                    onBack = { navController.popBackStack() }
+                )
             }
             composable(
                 route     = "agent/{agentId}",
@@ -209,6 +244,9 @@ fun OrbitalNavigation(vm: MainViewModel, appearance: AppearanceSettings) {
             composable("troubleshoot") {
                 TroubleshootScreen(
                     serverName = vm.serverName,
+                    checks = vm.diagnostics,
+                    isRunning = vm.diagnosticsRunning,
+                    onRun = vm::runDiagnostics,
                     onBack     = { navController.popBackStack() }
                 )
             }

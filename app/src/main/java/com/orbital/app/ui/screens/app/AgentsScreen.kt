@@ -20,9 +20,9 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.orbital.app.R
 import com.orbital.app.domain.Agent
 import com.orbital.app.domain.AgentStatus
+import com.orbital.app.ui.components.agentLogoRes
 import com.orbital.app.ui.components.Dot
 import com.orbital.app.ui.theme.OrbitalTheme
 
@@ -89,14 +89,7 @@ private fun AgentCard(agent: Agent, dotCol: Color, onClick: () -> Unit) {
     val typ  = OrbitalTheme.typography
     val off  = agent.status == AgentStatus.OFFLINE
 
-    val logoRes = when (agent.id.lowercase()) {
-        "claude"  -> R.drawable.ic_agent_claude
-        "codex"   -> R.drawable.ic_agent_codex
-        "gemini"  -> R.drawable.ic_agent_gemini
-        "aider"   -> R.drawable.ic_agent_aider
-        "cursor"  -> R.drawable.ic_agent_cursor
-        else      -> null
-    }
+    val logoRes = agentLogoRes(agent.id)
 
     Column(
         modifier = Modifier

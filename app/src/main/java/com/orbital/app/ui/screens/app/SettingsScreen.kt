@@ -9,11 +9,13 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -37,8 +39,14 @@ private val FONTS = listOf("Syne / JetBrains", "DM Sans / Fira", "Space / IBM Pl
 @Composable
 fun SettingsScreen(
     serverHost: String,
+    backendProfileLabel: String,
+    authToken: String,
+    connectionError: String?,
     appearance: AppearanceSettings,
     onAppearanceChange: (AppearanceSettings) -> Unit,
+    onSaveToken: (String) -> Unit,
+    onRefreshData: () -> Unit,
+    onDisconnect: () -> Unit,
     onTroubleshoot: () -> Unit
 ) {
     val th   = OrbitalTheme.colors
@@ -51,6 +59,7 @@ fun SettingsScreen(
     var notifComplete    by remember { mutableStateOf(true) }
     var notifOffline     by remember { mutableStateOf(true) }
     var notifSkills      by remember { mutableStateOf(false) }
+    var tokenInput       by remember(authToken) { mutableStateOf(authToken) }
 
     Column(
         modifier = Modifier
@@ -224,11 +233,88 @@ fun SettingsScreen(
         SettingsCard {
             InfoRow("Host", serverHost.ifEmpty { "—" })
             Box(Modifier.fillMaxWidth().height(1.dp).background(th.border))
+            InfoRow("Backend", backendProfileLabel)
+            Box(Modifier.fillMaxWidth().height(1.dp).background(th.border))
             InfoRow("Via", "LAN (primary)")
+            Box(Modifier.fillMaxWidth().height(1.dp).background(th.border))
+            Column(modifier = Modifier.padding(vertical = 9.dp)) {
+                Text(
+                    text = "Auth token",
+                    style = typ.labelSmall.copy(color = th.sub, fontSize = 9.5.sp, fontFamily = mono),
+                    modifier = Modifier.padding(bottom = 8.dp)
+                )
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(th.void)
+                        .border(1.dp, th.border, RoundedCornerShape(10.dp))
+                        .padding(horizontal = 10.dp, vertical = 8.dp)
+                ) {
+                    if (tokenInput.isBlank()) {
+                        Text(
+                            text = "Paste bearer token...",
+                            style = typ.labelSmall.copy(color = th.muted, fontSize = 8.5.sp, fontFamily = mono)
+                        )
+                    }
+                    BasicTextField(
+                        value = tokenInput,
+                        onValueChange = { tokenInput = it },
+                        textStyle = typ.labelSmall.copy(color = th.text, fontSize = 8.5.sp, fontFamily = mono),
+                        cursorBrush = SolidColor(th.accentP),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            }
             Box(Modifier.fillMaxWidth().height(1.dp).background(th.border))
             Toggle(label = "Auto-reconnect", value = autoReconnect, onChange = { autoReconnect = it })
             Box(Modifier.fillMaxWidth().height(1.dp).background(th.border))
             Toggle(label = "Tailscale", value = tailscale, onChange = { tailscale = it })
+            Box(Modifier.fillMaxWidth().height(1.dp).background(th.border))
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 9.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(th.accentI)
+                        .border(1.dp, th.accentP, RoundedCornerShape(10.dp))
+                        .clickable { onSaveToken(tokenInput) }
+                        .padding(vertical = 9.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "Save token",
+                        style = typ.labelSmall.copy(color = Color.White, fontSize = 8.5.sp, fontFamily = mono)
+                    )
+                }
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(th.raised)
+                        .border(1.dp, th.border, RoundedCornerShape(10.dp))
+                        .clickable { onRefreshData() }
+                        .padding(vertical = 9.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "Refresh data",
+                        style = typ.labelSmall.copy(color = th.text, fontSize = 8.5.sp, fontFamily = mono)
+                    )
+                }
+            }
+            if (!connectionError.isNullOrBlank()) {
+                Text(
+                    text = connectionError,
+                    style = typ.labelSmall.copy(color = RED, fontSize = 8.5.sp, fontFamily = mono),
+                    modifier = Modifier.padding(bottom = 8.dp)
+                )
+            }
         }
 
         // ─── Notifications ──────────────────────────────────────
@@ -276,6 +362,7 @@ fun SettingsScreen(
                 .clip(RoundedCornerShape(12.dp))
                 .background(RED)
                 .border(1.dp, RED, RoundedCornerShape(12.dp))
+                .clickable { onDisconnect() }
                 .padding(vertical = 12.dp),
             contentAlignment = Alignment.Center
         ) {
